@@ -1,0 +1,95 @@
+name: lifeos
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lifeos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lifeos}
+      POSTGRES_DB: ${POSTGRES_DB:-lifeos}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lifeos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies pending Drizzle migrations before `web` starts. Runs on every `up` — already-
+  # applied migrations are skipped (tracked in the `__drizzle_migrations` table), so this is
+  # safe to repeat. Without this, a fresh `pgdata` volume has no tables at all and `web`
+  # fails with "relation does not exist" on its very first query.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lifeos}:${POSTGRES_PASSWORD:-lifeos}@postgres:5432/${POSTGRES_DB:-lifeos}
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lifeos}:${POSTGRES_PASSWORD:-lifeos}@postgres:5432/${POSTGRES_DB:-lifeos}
+    # DECISIONS.md ADR-099 — lets SPORTS_BETTING_URL=http://host.docker.internal:5034 resolve.
+    # sports-betting runs in its own separate docker-compose project (a different default
+    # network), reachable via its published host port rather than a shared Docker network.
+    # This mapping isn't automatic on Linux Docker Engine the way it is on Docker Desktop.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Proactively refreshes weather/calendar/sports/feed on a timer instead of only lazily
+  # syncing on page load (DECISIONS.md ADR-088). Not on the `web` request path at all — if
+  # this container is down, the app still works exactly as it did before this existed,
+  # just back to lazy on-page-load syncing.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lifeos}:${POSTGRES_PASSWORD:-lifeos}@postgres:5432/${POSTGRES_DB:-lifeos}
+
+  # Optional: self-hosted local model runtime. Enable with `--profile ai-local`.
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    profiles: ["ai-local"]
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  pgdata:
+  ollama_data:

@@ -1,0 +1,95 @@
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DueBadge } from "@/components/dashboard/due-badge";
+import { DomainAvatar, domainMeta } from "@/components/dashboard/domain-icon";
+import { formatInUserZone } from "@/lib/format";
+import type { CandidateDomain, RankedItem } from "@/lib/today/ranking";
+
+/**
+ * DECISIONS.md ADR-102/103 — same fix shape as ADR-101 (finance): DueBadge alone renders
+ * nothing for anything past the due-soon window, so TODAY items 4-14 days out (this card's
+ * whole range) need a plain date/time too. Calendar and sports carry a specific time worth
+ * showing; every other domain here only tracks a date, matching
+ * components/finance/accounts-list.tsx's "MMM d".
+ *
+ * ADR-103: calendar/sports originally used weekday-only ("Thu 8:00 PM", matching
+ * components/sports/game-card.tsx's own "EEE h:mm a") — but that card is scoped to *today's*
+ * games specifically, with no ambiguity about which day "Thu" means. Here, TODAY's own
+ * 14-day lookahead means a weekday alone is genuinely ambiguous (a real report: "Thu" read as
+ * "this Thursday" when the event was two weeks out) — the actual date is the whole point, so
+ * it's included instead of the weekday, not alongside it (keeps the label from growing past
+ * what this narrow column comfortably fits).
+ */
+function formatItemDate(dueAt: Date, timezone: string, domain: CandidateDomain): string {
+  if (domain === "calendar" || domain === "sports") {
+    return formatInUserZone(dueAt, timezone, "MMM d, h:mm a");
+  }
+  return formatInUserZone(dueAt, timezone, "MMM d");
+}
+
+export function TodayGroupCard({
+  domain,
+  title,
+  items,
+  overflow = 0,
+  timezone,
+}: {
+  domain: CandidateDomain;
+  title: string;
+  items: RankedItem[];
+  /** DECISIONS.md ADR-063/079 — how many more exist beyond what's shown here. */
+  overflow?: number;
+  timezone: string;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle href={domainMeta(domain).href}>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-2 pt-0">
+        <ul className="flex flex-col">
+          {items.map((item) => (
+            <li key={item.id}>
+              <Link
+                href={domainMeta(domain).href}
+                className="flex items-center gap-3 rounded-lg p-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+              >
+                <DomainAvatar domain={domain} tone="muted" />
+                <span className="flex-1 truncate">
+                  <span className="block truncate font-medium">{item.title}</span>
+                  {item.subtitle && (
+                    <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                      {item.subtitle}
+                    </span>
+                  )}
+                </span>
+                {item.dueAt && (
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className="text-xs text-neutral-400">
+                      {formatItemDate(item.dueAt, timezone, domain)}
+                    </span>
+                    <DueBadge due={item.due} domain={domain} live={item.live} />
+                  </div>
+                )}
+                <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
+              </Link>
+            </li>
+          ))}
+          {overflow > 0 && (
+            <li>
+              <Link
+                href={domainMeta(domain).href}
+                className="block rounded-lg px-2 py-1.5 text-xs text-neutral-400 hover:underline dark:text-neutral-500"
+              >
+                + {overflow} more
+              </Link>
+            </li>
+          )}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}

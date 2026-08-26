@@ -36,6 +36,27 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local data
+/backups
+/pgdata
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Android / Gradle (mobile/lifeos-android, mobile/whoop-bridge) — build output and local
+# machine-specific files, not source. Unscoped (no leading slash) so they're ignored at any
+# depth under either project.
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+*.apk
+*.aab

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "feed_last_viewed_at" timestamp with time zone;

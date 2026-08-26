@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple "W" mark, placeholder — sideloaded dev app, not a designed icon. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,38 L34,74 L44,50 L54,74 L64,38 L56,38 L50,60 L44,42 L38,60 L32,38 Z" />
+</vector>

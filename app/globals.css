@@ -3,13 +3,141 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /*
+   * DECISIONS.md ADR-125 (landscape visual direction, ADR-110 "dark mode remains the primary
+   * foundation") — the accent moved off the previous desaturated blue to copper/warm-gold,
+   * away from "generic blue productivity UI" and onto the earth palette introduced below.
+   * Still exactly one accent hue used via `dark:` variant pairs — this doesn't reopen
+   * ADR-090's restraint, just recolors the one hue it allows.
+   */
+  --accent: #a66b45;
+  --accent-dark: #c29563;
+}
+
+/*
+ * DECISIONS.md ADR-109/110/119 (landscape visual direction) — redefines Tailwind's built-in
+ * `neutral-*` scale itself, rather than touching the ~700 individual `neutral-*` class usages
+ * spread across every component. The app exclusively uses `neutral-*` for chrome/text/borders
+ * (semantic colors like red/amber/emerald/sky stay untouched — they carry urgency/weather/
+ * health meaning per ADR-122 and shouldn't fold into this ramp), so overriding the scale here
+ * cascades the warm earth-stone palette everywhere `neutral-*` already appears, light and dark,
+ * with no other file needing to change. Anchored to the brief's named colors where they land on
+ * an existing stop (950 = Background/Night, 900 = Surface, 800 = Stone, 400 = Muted Text, 200 =
+ * Parchment, 100 = Primary Text); other stops are interpolated to keep the ramp monotonic.
+ */
+@theme {
+  --color-neutral-50: #f5efe1;
+  --color-neutral-100: #e8ddc9;
+  --color-neutral-200: #d8c7aa;
+  --color-neutral-300: #c3ad82;
+  --color-neutral-400: #9d9585;
+  --color-neutral-500: #7d7566;
+  --color-neutral-600: #5c5548;
+  --color-neutral-700: #443f35;
+  --color-neutral-800: #302a22;
+  --color-neutral-900: #211f19;
+  --color-neutral-950: #0f0f0c;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* DECISIONS.md ADR-109 (landscape visual direction) — editorial serif for display headings
+     only (e.g. Today's date/greeting); data/labels/nav stay on --font-sans per the brief's own
+     "serif for display, sans for data" hierarchy. See app/layout.tsx for the font loader. */
+  --font-serif: var(--font-fraunces);
+  /*
+   * DECISIONS.md Motion Principles ("the interface settles after completion") — a small,
+   * one-shot fade + rise for calm-state confirmations (NowList's "All done", TodayGroups'
+   * "Nothing else today"), so they gently arrive instead of popping in. Not looping, not
+   * decorative — plays once on mount, communicates "this just became true."
+   */
+  --animate-settle: settle 0.4s ease-out;
+  /*
+   * DECISIONS.md ADR-104 — a scoped, deliberate exception to the "no continuous background
+   * animation" rule above, for rain/snow ambient weather only (components/dashboard/
+   * ambient-weather.tsx). Applied via Tailwind's `motion-safe:` variant at the call site, not
+   * gated here, so prefers-reduced-motion users get the pre-existing static appearance.
+   */
+  --animate-rain-drift: rain-drift 3s linear infinite;
+  --animate-rain-fall: rain-fall 0.9s linear infinite;
+  --animate-snow-fall: snow-fall 6s linear infinite;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rain-drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -40px 80px;
+  }
+}
+
+/* Individual falling raindrop streaks, layered on top of rain-drift's ambient texture —
+   angled to match that texture's 115deg stripes so the two read as one effect. Pixel-based
+   (not %) — `transform`'s percentage units resolve against the element's OWN size, not its
+   container, so a % here would barely move a ~20px-tall streak at all. Matches the ambient
+   header's `min-h-28` (112px, app/(dashboard)/page.tsx). */
+@keyframes rain-fall {
+  0% {
+    transform: translateY(-24px) rotate(12deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(140px) rotate(12deg);
+    opacity: 0;
+  }
+}
+
+/* Falling with a gentle side-to-side sway, not a straight drop — reads as actual snow rather
+   than dots sliding down a track. Per-flake duration/delay (set inline in SnowBackdrop) keep
+   many flakes sharing this one keyframe from swaying in visible unison. Pixel-based for the
+   same reason as rain-fall above. */
+@keyframes snow-fall {
+  0% {
+    transform: translate(0, -16px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  25% {
+    transform: translate(8px, 24px);
+  }
+  50% {
+    transform: translate(-8px, 64px);
+  }
+  75% {
+    transform: translate(8px, 104px);
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(0, 140px);
+    opacity: 0;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

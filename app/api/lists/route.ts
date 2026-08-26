@@ -1,0 +1,31 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireUserOrNull } from "@/lib/auth/guards";
+import { createList, listLists } from "@/lib/lists/service";
+
+export async function GET() {
+  const user = await requireUserOrNull();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const lists = await listLists(user.id);
+  return NextResponse.json({ lists });
+}
+
+const createListSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  listType: z.string().trim().max(100).optional(),
+});
+
+export async function POST(request: Request) {
+  const user = await requireUserOrNull();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json().catch(() => null);
+  const parsed = createListSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
+  }
+
+  const list = await createList(user.id, parsed.data.name, parsed.data.listType);
+  return NextResponse.json({ list }, { status: 201 });
+}

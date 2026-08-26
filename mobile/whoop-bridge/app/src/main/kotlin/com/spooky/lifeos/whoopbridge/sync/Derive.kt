@@ -1,0 +1,132 @@
+package com.spooky.lifeos.whoopbridge.sync
+
+import com.spooky.lifeos.whoopbridge.db.LocalDb
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import kotlin.math.round
+import kotlin.math.sqrt
+
+/**
+ * Turns accumulated local raw_samples into LifeOS-shaped readings. v1 scope per the
+ * plan: raw vitals only (heart rate, HRV) — no recovery/strain/sleep scoring, since
+ * that logic (openstrap_analytics) was explicitly not ported to Kotlin.
+ *
+ * RMSSD (root mean square of successive R-R interval differences) is a standard,
+ * unambiguous published HRV formula — but naively flattening every RR value across an
+ * hour and diffing consecutive entries in that list is NOT the same as diffing
+ * consecutive *heartbeats*: found live (real device data, 2026-08-25) that WHOOP's
+ * gen5 strap only reports an RR value on ~15% of seconds, so most "successive" pairs
+ * in that flattened list actually span an unrecorded gap of one or more real beats —
+ * inflating RMSSD to 400-560ms (physiological range is roughly 20-100ms). Fixed by
+ * porting OpenStrap/edge's real, verified artifact-rejection pipeline
+ * (lib/compute/derivation_engine.dart's dayHrvCurve) rather than inventing one:
+ * a plausibility gate on raw RR values, the published Malik 20% successive-difference
+ * rule to drop ectopic/missed-beat pairs, a minimum valid-pair count before trusting
+ * the result at all, and a final sanity ceiling. Verified against this device's own
+ * real backlog: 561.6ms (naive) -> 72.4ms (this algorithm) on the same hour of data.
+ */
+object DailyDerive {
+    // OpenStrap/edge's dayHrvCurve bounds, verified against its real source rather than
+    // guessed: RR plausibility is tighter than the raw protocol's own 200-2500ms
+    // transmission range (Gen5Records.kt), and a successive pair is only trusted if its
+    // beat-to-beat change is small — a jump bigger than 20% of the previous interval
+    // (or 200ms absolute) is treated as an ectopic/missed beat, not a real pair.
+    private const val RR_PLAUSIBLE_MIN_MS = 300
+    private const val RR_PLAUSIBLE_MAX_MS = 2000
+    private const val MALIK_RELATIVE_THRESHOLD = 0.20
+    private const val MALIK_ABSOLUTE_THRESHOLD_MS = 200
+    private const val MIN_VALID_PAIRS = 8
+    private const val RMSSD_SANITY_CEILING_MS = 220.0
+
+    data class RmssdResult(val rmssdMs: Double, val validPairs: Int, val plausibleRrCount: Int)
+
+    /**
+     * Pure — no Android/db dependency — so this is unit-testable the same way the protocol
+     * layer's CRC/framing math is, unlike `deriveForNow` itself (needs a real LocalDb).
+     * Takes every RR value from every sample in a window, in chronological order; returns
+     * null if the window doesn't have enough trustworthy data to report a value at all
+     * (fewer than [MIN_VALID_PAIRS] valid pairs, or the result is still above the sanity
+     * ceiling after filtering) rather than a number that isn't actually reliable.
+     */
+    fun computeRmssd(rrValuesInOrder: List<Int>): RmssdResult? {
+        val plausibleRr = rrValuesInOrder.filter { it in RR_PLAUSIBLE_MIN_MS..RR_PLAUSIBLE_MAX_MS }
+
+        var sumSquaredDiffs = 0.0
+        var validPairs = 0
+        for (i in 1 until plausibleRr.size) {
+            val diff = (plausibleRr[i] - plausibleRr[i - 1]).toDouble()
+            // Malik 20% rule — a jump this large between "successive" entries means
+            // they weren't actually consecutive heartbeats (a gap swallowed a real
+            // beat), not that the heart genuinely changed pace that fast. Skip the
+            // pair rather than let it corrupt the sum.
+            if (kotlin.math.abs(diff) > MALIK_RELATIVE_THRESHOLD * plausibleRr[i - 1] || kotlin.math.abs(diff) > MALIK_ABSOLUTE_THRESHOLD_MS) {
+                continue
+            }
+            sumSquaredDiffs += diff * diff
+            validPairs++
+        }
+
+        if (validPairs < MIN_VALID_PAIRS) return null
+        val rmssd = round(sqrt(sumSquaredDiffs / validPairs) * 10) / 10
+        if (rmssd > RMSSD_SANITY_CEILING_MS) return null
+        return RmssdResult(rmssdMs = rmssd, validPairs = validPairs, plausibleRrCount = plausibleRr.size)
+    }
+
+    fun deriveForNow(db: LocalDb): JSONArray {
+        val readings = JSONArray()
+        // Anchor on the latest sample actually present, NOT wall-clock now — a first
+        // sync (or any sync after a gap) drains the strap's own backlog, and those
+        // records carry real PAST timestamps from when they were recorded, not close
+        // to "now." See LocalDb.latestSampleSec's doc for how this was found live.
+        val latestSec = db.latestSampleSec() ?: return readings
+        val windowStart = latestSec - 3600 // last hour of DATA, not last hour of wall-clock
+
+        val samples = db.samplesInRange(windowStart, latestSec)
+        if (samples.isEmpty()) return readings
+
+        samples.lastOrNull { it.hr != null }?.let { s ->
+            readings.put(
+                JSONObject()
+                    .put("type", "heart_rate")
+                    .put("value", s.hr)
+                    .put("unit", "bpm")
+                    .put("measuredAt", Instant.ofEpochSecond(s.tsSec).toString()),
+            )
+        }
+
+        // Decoded off every gen5 sample already (Gen5HistorySample.skinTempCOrNull) —
+        // previously logged to the on-screen debug text and thrown away. Reuses this same
+        // readings upload path exactly like heart_rate above; LifeOS already has a
+        // "skin_temp" slot in WHOOP_CARD_TYPES with no data ever received for it.
+        samples.lastOrNull { it.skinTempC != null }?.let { s ->
+            readings.put(
+                JSONObject()
+                    .put("type", "skin_temp")
+                    .put("value", s.skinTempC)
+                    .put("unit", "C")
+                    .put("measuredAt", Instant.ofEpochSecond(s.tsSec).toString()),
+            )
+        }
+
+        val rrValuesInOrder = samples.flatMap { it.rrMs }
+        computeRmssd(rrValuesInOrder)?.let { result ->
+            readings.put(
+                JSONObject()
+                    .put("type", "hrv")
+                    .put("value", result.rmssdMs)
+                    .put("unit", "ms")
+                    .put("measuredAt", Instant.ofEpochSecond(samples.last().tsSec).toString())
+                    .put(
+                        "metadata",
+                        JSONObject()
+                            .put("method", "rmssd_malik_filtered")
+                            .put("valid_pairs", result.validPairs)
+                            .put("plausible_rr_count", result.plausibleRrCount),
+                    ),
+            )
+        }
+
+        return readings
+    }
+}

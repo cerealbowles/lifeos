@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "bottom_nav_items" jsonb;

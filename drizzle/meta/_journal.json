@@ -1,0 +1,167 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786473718554,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786476953501,
+      "tag": "0001_add_weather",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786478584935,
+      "tag": "0002_add_statement_close_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786538427138,
+      "tag": "0003_add_calendar",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786540162537,
+      "tag": "0004_add_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786544797743,
+      "tag": "0005_add_sports",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786546558490,
+      "tag": "0006_optimal_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786548615424,
+      "tag": "0007_wide_roxanne_simpson",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786633340861,
+      "tag": "0008_ordinary_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786636545136,
+      "tag": "0009_funny_miracleman",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786646707427,
+      "tag": "0010_lazy_giant_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786715321880,
+      "tag": "0011_complete_daredevil",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786716313560,
+      "tag": "0012_dapper_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786746504604,
+      "tag": "0013_bored_raider",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786971991171,
+      "tag": "0014_common_adam_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786976759816,
+      "tag": "0015_motionless_scorpion",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786976783139,
+      "tag": "0016_new_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787143842983,
+      "tag": "0017_smooth_nocturne",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787144790897,
+      "tag": "0018_magenta_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787418084271,
+      "tag": "0019_magical_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787670664622,
+      "tag": "0020_classy_black_cat",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787671872194,
+      "tag": "0021_lyrical_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787685297312,
+      "tag": "0022_worthless_stepford_cuckoos",
+      "breakpoints": true
+    }
+  ]
+}
