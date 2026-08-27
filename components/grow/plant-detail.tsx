@@ -131,17 +131,26 @@ export function PlantDetail({ plantId }: { plantId: string }) {
               : "Never checked"}
           </p>
         </div>
-        {!plant.active && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {!plant.active && (
             <Button type="button" variant="outline" size="sm" onClick={() => restore.mutate()}>
               Restore
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => deletePlant.mutate()}>
-              <Trash2 className="h-4 w-4 text-neutral-400" />
-              Delete
-            </Button>
-          </div>
-        )}
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (confirm(`Delete ${plant.strain}? This cannot be undone.`)) {
+                deletePlant.mutate();
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4 text-neutral-400" />
+            Delete
+          </Button>
+        </div>
       </div>
 
       <form
