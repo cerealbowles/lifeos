@@ -6,22 +6,29 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -30,10 +37,9 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,8 +60,10 @@ import com.spooky.lifeos.android.sync.BrowseClient
 
 /**
  * The tap-through destination TODAY items point at on the web (domainMeta(domain).href) —
- * here, a single screen with a domain switcher up top rather than six separate nav
- * destinations, since there's no space for a second-level nav bar on mobile.
+ * here, a single screen. Lands on a launcher-style grid of all six domains (`domain == null`)
+ * rather than defaulting into one of them, since there's no space for a second-level nav bar
+ * on mobile and a grid reads more like "browse everything" than an arbitrary starting tab.
+ * Picking a tile fades the grid out and fades the domain's list in.
  *
  * Wrapped in [SharedTransitionLayout] + [AnimatedContent] so a tapped row shared-element-
  * transforms into a full per-domain detail screen (BrowseDetailScreens.kt) — same pattern
@@ -66,7 +75,7 @@ fun BrowseScreen() {
     val context = LocalContext.current
     val config = remember { LifeosConfig(context) }
 
-    var domain by remember { mutableStateOf(BrowseDomain.PET) }
+    var domain by remember { mutableStateOf<BrowseDomain?>(null) }
     var rows by remember { mutableStateOf<List<BrowseRow>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -80,12 +89,14 @@ fun BrowseScreen() {
     var showCreate by remember { mutableStateOf(false) }
 
     LaunchedEffect(domain, refreshKey) {
+        val d = domain ?: return@LaunchedEffect
         val baseUrl = config.getBaseUrl()
         val token = config.getToken()
         if (baseUrl == null || token == null) return@LaunchedEffect
         loading = true
         error = null
-        when (val result = BrowseClient(baseUrl, token).list(domain)) {
+        rows = null
+        when (val result = BrowseClient(baseUrl, token).list(d)) {
             is ApiResult.Success -> rows = result.value
             is ApiResult.Failure -> error = result.message
         }
@@ -93,36 +104,104 @@ fun BrowseScreen() {
     }
 
     if (showCreate) {
+        // Only reachable via the list body's FAB, which only renders once a domain is picked.
+        val activeDomain = domain ?: return
         BackHandler { showCreate = false }
-        BrowseCreateHost(domain = domain, onBack = { showCreate = false }, onCreated = { refreshKey++ })
+        BrowseCreateHost(domain = activeDomain, onBack = { showCreate = false }, onCreated = { refreshKey++ })
         return
     }
 
     SharedTransitionLayout {
-        AnimatedContent(targetState = selectedRow, label = "BrowseDetailTransition") { row ->
-            if (row == null) {
-                BrowseListBody(
-                    domain = domain,
-                    onSelectDomain = { domain = it },
-                    rows = rows,
-                    error = error,
-                    loading = loading,
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedVisibilityScope = this,
-                    onSelectRow = { selectedRow = it },
-                    onAddClick = { showCreate = true },
-                )
+        AnimatedContent(
+            targetState = domain,
+            label = "BrowseDomainTransition",
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+        ) { targetDomain ->
+            if (targetDomain == null) {
+                BrowseDomainGrid(onSelectDomain = { domain = it })
             } else {
-                BackHandler { selectedRow = null }
-                BrowseDetailHost(
-                    domain = domain,
-                    row = row,
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedVisibilityScope = this,
-                    onBack = { selectedRow = null },
-                    onActionComplete = { refreshKey++ },
-                )
+                AnimatedContent(targetState = selectedRow, label = "BrowseDetailTransition") { row ->
+                    if (row == null) {
+                        BackHandler { domain = null }
+                        BrowseListBody(
+                            domain = targetDomain,
+                            onBack = { domain = null },
+                            rows = rows,
+                            error = error,
+                            loading = loading,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
+                            onSelectRow = { selectedRow = it },
+                            onAddClick = { showCreate = true },
+                        )
+                    } else {
+                        BackHandler { selectedRow = null }
+                        BrowseDetailHost(
+                            domain = targetDomain,
+                            row = row,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
+                            onBack = { selectedRow = null },
+                            onActionComplete = { refreshKey++ },
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+/** Landing page: every Browse domain as an icon tile in a grid, matching the "buttons in the
+ *  top row" the domain switcher used to be — now the whole first screen instead of a strip of
+ *  chips, since there's room to make each domain a full tappable target. */
+@Composable
+private fun BrowseDomainGrid(onSelectDomain: (BrowseDomain) -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            "Browse",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = LifeosColors.foreground,
+            modifier = Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp),
+        )
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(BrowseDomain.entries, key = { it.name }) { entry ->
+                BrowseDomainTile(entry, onClick = { onSelectDomain(entry) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowseDomainTile(domain: BrowseDomain, onClick: () -> Unit) {
+    val tone = domainColor(domain.toRankingDomain())
+    com.spooky.lifeos.android.ui.components.LifeCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier.size(48.dp).background(tone.bg, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(browseDomainIcon(domain), contentDescription = null, tint = tone.fg, modifier = Modifier.size(24.dp))
+            }
+            Text(
+                domain.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = LifeosColors.foreground,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }
@@ -145,7 +224,7 @@ private fun BrowseCreateHost(domain: BrowseDomain, onBack: () -> Unit, onCreated
 @Composable
 private fun BrowseListBody(
     domain: BrowseDomain,
-    onSelectDomain: (BrowseDomain) -> Unit,
+    onBack: () -> Unit,
     rows: List<BrowseRow>?,
     error: String?,
     loading: Boolean,
@@ -156,35 +235,20 @@ private fun BrowseListBody(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text(
-                    "Browse",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = LifeosColors.foreground,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                ) {
-                    items(BrowseDomain.entries) { entry ->
-                        FilterChip(
-                            selected = domain == entry,
-                            onClick = { onSelectDomain(entry) },
-                            label = { Text(entry.label) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = LifeosColors.accent,
-                                selectedLabelColor = LifeosColors.background,
-                                containerColor = LifeosColors.glassSurface,
-                                labelColor = LifeosColors.mutedFg,
-                            ),
-                        )
-                    }
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Browse", tint = LifeosColors.foreground)
             }
+            Text(
+                domain.label,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = LifeosColors.foreground,
+                modifier = Modifier.padding(start = 4.dp),
+            )
         }
 
         when {
@@ -253,20 +317,22 @@ private fun BrowseListBody(
 @Composable
 private fun BrowseRowIcon(domain: BrowseDomain) {
     val tone = domainColor(domain.toRankingDomain())
-    val icon = when (domain) {
-        BrowseDomain.PET -> Icons.Filled.Pets
-        BrowseDomain.GROW -> Icons.Filled.Eco
-        BrowseDomain.FINANCIAL -> Icons.Filled.AttachMoney
-        BrowseDomain.ROUTINE -> Icons.Filled.Repeat
-        BrowseDomain.CALENDAR -> Icons.Filled.CalendarMonth
-        BrowseDomain.SPORTS -> Icons.Filled.EmojiEvents
-    }
     Box(
-        modifier = Modifier.size(36.dp).background(tone.bg, androidx.compose.foundation.shape.CircleShape),
+        modifier = Modifier.size(36.dp).background(tone.bg, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tone.fg, modifier = Modifier.size(18.dp))
+        Icon(browseDomainIcon(domain), contentDescription = null, tint = tone.fg, modifier = Modifier.size(18.dp))
     }
+}
+
+/** Same icon mapping shared by the landing grid's tiles and each list row's avatar. */
+private fun browseDomainIcon(domain: BrowseDomain): ImageVector = when (domain) {
+    BrowseDomain.PET -> Icons.Filled.Pets
+    BrowseDomain.GROW -> Icons.Filled.Eco
+    BrowseDomain.FINANCIAL -> Icons.Filled.AttachMoney
+    BrowseDomain.ROUTINE -> Icons.Filled.Repeat
+    BrowseDomain.CALENDAR -> Icons.Filled.CalendarMonth
+    BrowseDomain.SPORTS -> Icons.Filled.EmojiEvents
 }
 
 private fun emptyStateCopy(domain: BrowseDomain): String = when (domain) {
