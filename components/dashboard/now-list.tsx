@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { DueBadge } from "@/components/dashboard/due-badge";
 import { DomainAvatar, domainMeta } from "@/components/dashboard/domain-icon";
 import { SwipeToComplete } from "@/components/dashboard/swipe-to-complete";
 import { CollapsibleItem } from "@/components/dashboard/collapsible-item";
+import { ItemDetailSheet, itemOpensSheet } from "@/components/dashboard/item-detail-sheet";
 import { useCollapseThen } from "@/lib/hooks/use-collapse-then";
 import { getCompleteRequest } from "@/lib/today/complete";
 import type { PulseState, RankedItem } from "@/lib/today/ranking";
@@ -29,6 +31,7 @@ import type { PulseState, RankedItem } from "@/lib/today/ranking";
 export function NowList({ items, pulse }: { items: RankedItem[]; pulse: PulseState }) {
   const router = useRouter();
   const { collapseThen, isCollapsing } = useCollapseThen();
+  const [openItem, setOpenItem] = useState<RankedItem | null>(null);
 
   const complete = useMutation({
     mutationFn: (item: RankedItem) => {
@@ -64,11 +67,10 @@ export function NowList({ items, pulse }: { items: RankedItem[]; pulse: PulseSta
         <ul className="flex flex-col gap-1">
           {items.map((item) => {
             const key = `${item.domain}-${item.id}`;
-            const row = (
-              <Link
-                href={item.href ?? domainMeta(item.domain).href}
-                className="flex items-center gap-3 rounded-lg bg-white p-2 text-sm hover:bg-neutral-50 dark:bg-neutral-900 dark:hover:bg-neutral-800/60"
-              >
+            const rowClassName =
+              "flex w-full items-center gap-3 rounded-lg bg-white p-2 text-left text-sm hover:bg-neutral-50 dark:bg-neutral-900 dark:hover:bg-neutral-800/60";
+            const rowContent = (
+              <>
                 <DomainAvatar domain={item.domain} />
                 <span className="flex-1 truncate">
                   <span className="block truncate font-medium">{item.title}</span>
@@ -80,6 +82,15 @@ export function NowList({ items, pulse }: { items: RankedItem[]; pulse: PulseSta
                 </span>
                 <DueBadge due={item.due} domain={item.domain} live={item.live} />
                 <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
+              </>
+            );
+            const row = itemOpensSheet(item) ? (
+              <button type="button" onClick={() => setOpenItem(item)} className={rowClassName}>
+                {rowContent}
+              </button>
+            ) : (
+              <Link href={item.href ?? domainMeta(item.domain).href} className={rowClassName}>
+                {rowContent}
               </Link>
             );
 
@@ -99,6 +110,15 @@ export function NowList({ items, pulse }: { items: RankedItem[]; pulse: PulseSta
           })}
         </ul>
       </CardContent>
+      <ItemDetailSheet
+        item={openItem}
+        onClose={() => setOpenItem(null)}
+        onCheckedIn={() => {
+          const key = openItem ? `${openItem.domain}-${openItem.id}` : null;
+          setOpenItem(null);
+          if (key) collapseThen(key, () => router.refresh());
+        }}
+      />
     </Card>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DueBadge } from "@/components/dashboard/due-badge";
 import { DomainAvatar, domainMeta } from "@/components/dashboard/domain-icon";
 import { CollapsibleItem } from "@/components/dashboard/collapsible-item";
+import { ItemDetailSheet, itemOpensSheet } from "@/components/dashboard/item-detail-sheet";
 import { useCollapseThen } from "@/lib/hooks/use-collapse-then";
 import { getCompleteRequest } from "@/lib/today/complete";
 import { formatInUserZone } from "@/lib/format";
@@ -53,6 +55,7 @@ export function TodayGroupCard({
 }) {
   const router = useRouter();
   const { collapseThen, isCollapsing } = useCollapseThen();
+  const [openItem, setOpenItem] = useState<RankedItem | null>(null);
 
   const complete = useMutation({
     mutationFn: (item: RankedItem) => {
@@ -74,6 +77,28 @@ export function TodayGroupCard({
         <ul className="flex flex-col">
           {items.map((item) => {
             const completable = getCompleteRequest(item) !== null;
+            const rowClassName =
+              "flex flex-1 items-center gap-3 rounded-lg p-2 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60";
+            const rowContent = (
+              <>
+                <DomainAvatar domain={domain} tone="muted" />
+                <span className="flex-1 truncate">
+                  <span className="block truncate font-medium">{item.title}</span>
+                  {item.subtitle && (
+                    <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                      {item.subtitle}
+                    </span>
+                  )}
+                </span>
+                {item.dueAt && (
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className="text-xs text-neutral-400">{formatItemDate(item.dueAt, timezone, domain)}</span>
+                    <DueBadge due={item.due} domain={domain} live={item.live} />
+                  </div>
+                )}
+                <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
+              </>
+            );
             return (
               <CollapsibleItem key={item.id} collapsed={isCollapsing(item.id)}>
                 <div className="flex items-center gap-1">
@@ -85,29 +110,15 @@ export function TodayGroupCard({
                       className="ml-2"
                     />
                   )}
-                  <Link
-                    href={item.href ?? domainMeta(domain).href}
-                    className="flex flex-1 items-center gap-3 rounded-lg p-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
-                  >
-                    <DomainAvatar domain={domain} tone="muted" />
-                    <span className="flex-1 truncate">
-                      <span className="block truncate font-medium">{item.title}</span>
-                      {item.subtitle && (
-                        <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
-                          {item.subtitle}
-                        </span>
-                      )}
-                    </span>
-                    {item.dueAt && (
-                      <div className="flex flex-col items-end gap-0.5">
-                        <span className="text-xs text-neutral-400">
-                          {formatItemDate(item.dueAt, timezone, domain)}
-                        </span>
-                        <DueBadge due={item.due} domain={domain} live={item.live} />
-                      </div>
-                    )}
-                    <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
-                  </Link>
+                  {itemOpensSheet(item) ? (
+                    <button type="button" onClick={() => setOpenItem(item)} className={rowClassName}>
+                      {rowContent}
+                    </button>
+                  ) : (
+                    <Link href={item.href ?? domainMeta(domain).href} className={rowClassName}>
+                      {rowContent}
+                    </Link>
+                  )}
                 </div>
               </CollapsibleItem>
             );
@@ -124,6 +135,15 @@ export function TodayGroupCard({
           )}
         </ul>
       </CardContent>
+      <ItemDetailSheet
+        item={openItem}
+        onClose={() => setOpenItem(null)}
+        onCheckedIn={() => {
+          const id = openItem?.id ?? null;
+          setOpenItem(null);
+          if (id) collapseThen(id, () => router.refresh());
+        }}
+      />
     </Card>
   );
 }
