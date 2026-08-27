@@ -50,8 +50,10 @@ import org.json.JSONObject
  * there's no existing row to transform from, this is a fresh "add" action, so a simple
  * back-button scaffold (`CreateScaffold`) is enough.
  */
+/** Not `private` — reused by WorkoutScreens.kt's `LogWorkoutScreen`, same "fresh add action, no
+ *  row to transform from" reasoning applies there too. */
 @Composable
-private fun CreateScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+fun CreateScaffold(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
