@@ -7,13 +7,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spooky.lifeos.android.sync.ApiResult
+import com.spooky.lifeos.android.sync.BoxscoreClient
+import com.spooky.lifeos.android.sync.BoxscoreFetchResult
 import com.spooky.lifeos.android.sync.TodayActionsClient
 
 /**
@@ -65,7 +70,7 @@ fun ItemDetailSheet(
 
             when {
                 item.domain == "grow" -> GrowCheckInForm(item = item, baseUrl = baseUrl, token = token, onCheckedIn = onCheckedIn)
-                item.domain == "sports" && item.game != null -> GameDetailContent(item.game)
+                item.domain == "sports" && item.game != null -> GameDetailContent(item.game, baseUrl, token)
             }
         }
     }
@@ -116,12 +121,12 @@ private fun GrowCheckInForm(item: TodayItem, baseUrl: String?, token: String?, o
 
 /**
  * Score/status/odds for a favorite-team game — ports components/sports/game-card.tsx's header
- * (same fields, same moneyline formatting), minus the boxscore stats table (no native equivalent
- * of BoxscorePanel.tsx yet; the score/odds view alone already answers "what's the game doing
- * right now," which is what a Home tap is for).
+ * (same fields, same moneyline formatting) — plus the MLB boxscore (batting/pitching lines),
+ * fetched on demand and shown expanded by default, mirroring game-detail-panel.tsx's
+ * `canShowStats` gate: only for sport "mlb" with a gamePk, once the game is live or final.
  */
 @Composable
-private fun GameDetailContent(game: GameInfo) {
+private fun GameDetailContent(game: GameInfo, baseUrl: String?, token: String?) {
     val isLive = game.status == "Live"
     val isFinal = game.status == "Final"
 
@@ -182,6 +187,82 @@ private fun GameDetailContent(game: GameInfo) {
     if (!isLive && !isFinal && game.odds == null) {
         Spacer(modifier = Modifier.height(8.dp))
         Text("No odds yet — check back closer to kickoff.", style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg)
+    }
+
+    val canShowStats = game.sport == "mlb" && game.gamePk != null && (isLive || isFinal)
+    if (canShowStats) {
+        Spacer(modifier = Modifier.height(14.dp))
+        BoxscoreSection(gamePk = game.gamePk!!, baseUrl = baseUrl, token = token)
+    }
+}
+
+@Composable
+private fun BoxscoreSection(gamePk: Int, baseUrl: String?, token: String?) {
+    var result by remember(gamePk) { mutableStateOf<BoxscoreFetchResult?>(null) }
+
+    LaunchedEffect(gamePk, baseUrl, token) {
+        if (baseUrl == null || token == null) {
+            result = BoxscoreFetchResult.Failure("Not signed in")
+        } else {
+            result = BoxscoreClient(baseUrl, token).fetchBoxscore(gamePk)
+        }
+    }
+
+    when (val r = result) {
+        null -> {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = LifeosColors.mutedFg)
+            }
+        }
+        is BoxscoreFetchResult.Failure -> {
+            Text(r.message, style = MaterialTheme.typography.bodySmall, color = LifeosColors.overdueFg)
+        }
+        is BoxscoreFetchResult.Success -> {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                BoxscoreSideTable(r.boxscore.away)
+                Spacer(modifier = Modifier.height(12.dp))
+                BoxscoreSideTable(r.boxscore.home)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BoxscoreSideTable(side: BoxscoreSide) {
+    Text(side.abbr, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = LifeosColors.mutedFg)
+    if (side.batters.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(4.dp))
+        BoxscoreTableHeader(listOf("Batting", "AB", "R", "H", "RBI", "BB", "SO"))
+        side.batters.forEach { b ->
+            BoxscoreTableRow(listOf("${b.name} ${b.pos}", "${b.ab}", "${b.r}", "${b.h}", "${b.rbi}", "${b.bb}", "${b.so}"))
+        }
+    }
+    if (side.pitchers.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        BoxscoreTableHeader(listOf("Pitching", "IP", "H", "R", "ER", "BB", "SO"))
+        side.pitchers.forEach { p ->
+            BoxscoreTableRow(listOf(p.name, p.ip, "${p.h}", "${p.r}", "${p.er}", "${p.bb}", "${p.so}"))
+        }
+    }
+}
+
+@Composable
+private fun BoxscoreTableHeader(columns: List<String>) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Text(columns[0], style = MaterialTheme.typography.labelSmall, color = LifeosColors.mutedFg, modifier = Modifier.weight(2f))
+        columns.drop(1).forEach {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = LifeosColors.mutedFg, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun BoxscoreTableRow(columns: List<String>) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Text(columns[0], style = MaterialTheme.typography.bodySmall, color = LifeosColors.foreground, modifier = Modifier.weight(2f))
+        columns.drop(1).forEach {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = LifeosColors.foreground, modifier = Modifier.weight(1f))
+        }
     }
 }
 

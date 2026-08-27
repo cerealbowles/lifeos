@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,6 +75,7 @@ fun HealthScreen() {
     var skinTempBaseline by remember { mutableStateOf<SkinTempBaseline?>(null) }
     var skinTempError by remember { mutableStateOf<String?>(null) }
     var selectedSleepSession by remember { mutableStateOf<SleepSession?>(null) }
+    var showLogWorkout by remember { mutableStateOf(false) }
 
     // Every branch below sets its own error state on failure rather than silently falling
     // back to an empty list — found live: a stale requireUserOrNull() on /api/measurements
@@ -102,6 +105,11 @@ fun HealthScreen() {
         }
     }
 
+    if (showLogWorkout) {
+        LogWorkoutScreen(onBack = { showLogWorkout = false }, onLogged = { showLogWorkout = false })
+        return
+    }
+
     SharedTransitionLayout {
         AnimatedContent(targetState = selectedSleepSession, label = "SleepSessionDetail") { session ->
             if (session == null) {
@@ -116,6 +124,7 @@ fun HealthScreen() {
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this,
                     onSelectSleepSession = { selectedSleepSession = it },
+                    onLogWorkout = { showLogWorkout = true },
                 )
             } else {
                 BackHandler { selectedSleepSession = null }
@@ -143,6 +152,7 @@ private fun HealthScreenBody(
     sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
     animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope,
     onSelectSleepSession: (SleepSession) -> Unit,
+    onLogWorkout: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
@@ -173,6 +183,26 @@ private fun HealthScreenBody(
                     )
                 } else {
                     WhoopReadingsGrid(entries)
+                }
+            }
+
+            item { SectionLabel("Workouts") }
+            item {
+                TrendCard {
+                    Column {
+                        Text(
+                            "Log a walk, run, lift, or round of golf.",
+                            color = LifeosColors.mutedFg,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                        Button(
+                            onClick = onLogWorkout,
+                            colors = ButtonDefaults.buttonColors(containerColor = LifeosColors.accent, contentColor = LifeosColors.background),
+                        ) {
+                            Text("Log Workout")
+                        }
+                    }
                 }
             }
 

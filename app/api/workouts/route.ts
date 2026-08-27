@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { requireUserOrNull } from "@/lib/auth/guards";
 import { requireUserOrWebhookToken } from "@/lib/auth/webhook";
 import { createWorkout, listWorkouts } from "@/lib/workouts/service";
@@ -37,14 +38,19 @@ const createWorkoutSchema = z.object({
 });
 
 /**
- * DECISIONS.md ADR-095 — the one route in this app that accepts two different auth
- * mechanisms (session cookie or a bearer token, see lib/auth/webhook.ts), specifically so
- * an external automation can hit this without ever holding a browser session. `date`
- * defaults to today, since an automation firing right as a workout starts/ends has no reason
- * to compute and pass a date itself.
+ * DECISIONS.md ADR-095 — accepts three auth mechanisms: session cookie (web quick-log form),
+ * the static `WORKOUT_WEBHOOK_TOKEN` (an external automation — Home Assistant, an iOS
+ * Shortcut, an NFC tag — with no browser session), or a per-device api token (the Android
+ * app's Log Workout screen, same credential every other mobile endpoint uses). Tries the
+ * webhook check first since it's a no-op when unconfigured; falls back to the per-device
+ * token so the native app isn't stuck behind a shared-secret webhook the user never set up.
+ * `date` defaults to today, since an automation firing right as a workout starts/ends has no
+ * reason to compute and pass a date itself.
  */
 export async function POST(request: Request) {
-  const auth = await requireUserOrWebhookToken(request);
+  const webhookAuth = await requireUserOrWebhookToken(request);
+  const apiTokenAuth = webhookAuth ? null : await requireUserOrApiToken(request);
+  const auth = webhookAuth ?? apiTokenAuth;
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
