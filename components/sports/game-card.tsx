@@ -1,7 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import { format } from "date-fns";
-import { Star } from "lucide-react";
+import { ChevronDown, ChevronUp, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { BoxscorePanel } from "./boxscore-panel";
 import type { GameDTO } from "@/lib/sports/types";
 
 function formatMoneyline(value: number | null): string {
@@ -19,6 +23,8 @@ function formatMoneyline(value: number | null): string {
 export function GameCard({ game }: { game: GameDTO }) {
   const isLive = game.status === "Live";
   const isFinal = game.status === "Final";
+  const [expanded, setExpanded] = useState(false);
+  const canShowStats = game.sport === "mlb" && game.gamePk !== null && (isLive || isFinal);
 
   return (
     <Card className={game.isFavorite ? "border-amber-300 dark:border-amber-800" : undefined}>
@@ -67,6 +73,20 @@ export function GameCard({ game }: { game: GameDTO }) {
               </span>
             )}
           </div>
+        )}
+
+        {canShowStats && (
+          <>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex items-center gap-1 self-start text-xs font-medium text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+            >
+              Stats &amp; analysis
+              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            {expanded && <BoxscorePanel gamePk={game.gamePk!} />}
+          </>
         )}
       </CardContent>
     </Card>

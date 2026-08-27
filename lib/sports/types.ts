@@ -1,4 +1,7 @@
-import type { BettingGameStatus, BettingSport } from "./betting-client";
+import type { BettingGameStatus, BettingSport, Boxscore, BoxscoreSide } from "./betting-client";
+
+export type BoxscoreDTO = Boxscore;
+export type { BoxscoreSide };
 
 export type FavoriteTeamDTO = {
   id: string;
@@ -26,6 +29,7 @@ export type GameDTO = {
   startAt: string | null;
   odds: GameOddsDTO | null;
   isFavorite: boolean;
+  gamePk: number | null;
 };
 
 export type SportGroupDTO = {

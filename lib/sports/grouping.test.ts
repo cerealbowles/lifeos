@@ -13,6 +13,7 @@ function game(overrides: Partial<BettingGame>): BettingGame {
     period: "Top 5",
     startAt: "2026-08-17T18:00:00Z",
     odds: null,
+    gamePk: 717465,
     ...overrides,
   };
 }

@@ -2,7 +2,8 @@ import "server-only";
 
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import { fetchGames, isConfigured, BettingApiError } from "./betting-client";
+import { fetchBoxscore, fetchGames, isConfigured, BettingApiError } from "./betting-client";
+import type { Boxscore } from "./betting-client";
 import { getTeam } from "./teams";
 import { groupGames, toGameDTO } from "./grouping";
 import type { GameDTO, SportGroupDTO } from "./types";
@@ -72,4 +73,13 @@ export async function getFavoriteGames(userId: string): Promise<GameDTO[]> {
   const favoriteKeys = new Set(favorites.map((f) => `${f.sport}:${f.teamAbbr}`));
   const games = await fetchGames();
   return games.map((g) => toGameDTO(g, favoriteKeys)).filter((g) => g.isFavorite);
+}
+
+/**
+ * Trimmed batting/pitching lines for one MLB game — powers the "Stats & analysis" panel a
+ * game card expands into (components/sports/game-card.tsx). No userId scoping needed; this
+ * is public game data, not personal, same as getGamesGrouped.
+ */
+export async function getBoxscore(gamePk: number): Promise<Boxscore | null> {
+  return fetchBoxscore(gamePk);
 }

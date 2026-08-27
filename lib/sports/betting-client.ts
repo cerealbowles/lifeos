@@ -25,6 +25,41 @@ export type BettingGame = {
   /** ISO timestamp, or null if the source couldn't resolve a start time for this game. */
   startAt: string | null;
   odds: BettingGameOdds | null;
+  /** MLB Stats API gamePk — only present for sport "mlb", needed to fetch a boxscore. */
+  gamePk: number | null;
+};
+
+export type BoxscoreBatter = {
+  name: string;
+  pos: string;
+  ab: number;
+  r: number;
+  h: number;
+  rbi: number;
+  bb: number;
+  so: number;
+};
+
+export type BoxscorePitcher = {
+  name: string;
+  ip: string;
+  h: number;
+  r: number;
+  er: number;
+  bb: number;
+  so: number;
+  pitches: number;
+};
+
+export type BoxscoreSide = {
+  abbr: string;
+  batters: BoxscoreBatter[];
+  pitchers: BoxscorePitcher[];
+};
+
+export type Boxscore = {
+  away: BoxscoreSide;
+  home: BoxscoreSide;
 };
 
 /**
@@ -74,4 +109,34 @@ export async function fetchGames(sports: BettingSport[] = ["mlb", "nfl"]): Promi
 
   const data = (await res.json()) as { games: BettingGame[] };
   return data.games ?? [];
+}
+
+/**
+ * Trimmed current-game batting/pitching lines for one MLB game, from sports-betting's
+ * GET /api/lifeos/mlb/game/<gamePk>/boxscore — same gate as fetchGames(). Called on demand
+ * when a game card is expanded (components/sports/game-card.tsx), not on every games-list
+ * load, since most games on the page won't get expanded.
+ */
+export async function fetchBoxscore(gamePk: number): Promise<Boxscore | null> {
+  const baseUrl = process.env.SPORTS_BETTING_URL;
+  const token = process.env.SPORTS_BETTING_TOKEN;
+  if (!baseUrl || !token) return null;
+
+  const url = new URL(`/api/lifeos/mlb/game/${gamePk}/boxscore`, baseUrl);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "X-LifeOS-Token": token },
+      signal: AbortSignal.timeout(10_000),
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new BettingApiError(err instanceof Error ? err.message : "Could not reach sports-betting.");
+  }
+  if (res.status === 404) return null;
+  if (res.status === 401) throw new BettingApiError("sports-betting rejected the token — check SPORTS_BETTING_TOKEN.");
+  if (!res.ok) throw new BettingApiError(`sports-betting returned ${res.status}`);
+
+  return (await res.json()) as Boxscore;
 }
