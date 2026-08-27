@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "lifeos-android"
-include(":app")
+include(":app", ":protocol")

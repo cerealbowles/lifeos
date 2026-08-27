@@ -1,5 +1,6 @@
 package com.spooky.lifeos.android.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,10 +32,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.spooky.lifeos.android.LifeosConfig
 import com.spooky.lifeos.android.sync.ApiResult
 import com.spooky.lifeos.android.sync.DeviceInfo
 import com.spooky.lifeos.android.sync.SettingsClient
+import com.spooky.lifeos.android.sync.WhoopSyncService
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +57,7 @@ fun SettingsScreen(onLogout: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
+    var whoopSyncEnabled by remember { mutableStateOf(config.isWhoopSyncEnabled()) }
 
     fun load() {
         val baseUrl = config.getBaseUrl()
@@ -90,6 +96,39 @@ fun SettingsScreen(onLogout: () -> Unit) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             com.spooky.lifeos.android.ui.components.SectionHeader("SERVER")
             Text(config.getBaseUrl() ?: "—", style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground, modifier = Modifier.padding(top = 2.dp))
+        }
+
+        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            com.spooky.lifeos.android.ui.components.SectionHeader("WHOOP STRAP")
+        }
+        com.spooky.lifeos.android.ui.components.LifeCard(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Stay connected in background", style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground)
+                    Text(
+                        "Holds a live Bluetooth connection to your strap for near-real-time HR/HRV/sleep " +
+                            "sync. Uses more battery and shows a persistent notification.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LifeosColors.mutedFg,
+                    )
+                }
+                Switch(
+                    checked = whoopSyncEnabled,
+                    colors = SwitchDefaults.colors(checkedTrackColor = LifeosColors.accent),
+                    onCheckedChange = { enabled ->
+                        whoopSyncEnabled = enabled
+                        config.setWhoopSyncEnabled(enabled)
+                        val serviceIntent = Intent(context, WhoopSyncService::class.java)
+                        if (enabled) {
+                            ContextCompat.startForegroundService(context, serviceIntent)
+                        } else {
+                            context.stopService(serviceIntent)
+                        }
+                    },
+                )
+            }
         }
 
         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -161,6 +200,10 @@ fun SettingsScreen(onLogout: () -> Unit) {
                     if (baseUrl != null && token != null && tokenId != null) {
                         SettingsClient(baseUrl, token).revoke(tokenId) // best-effort — sign out locally either way
                     }
+                    // Otherwise it keeps holding the BLE connection with a now-invalid token —
+                    // harmless (WhoopUploader just logs "not configured" and retries), but
+                    // pointless battery/notification cost once signed out.
+                    context.stopService(Intent(context, WhoopSyncService::class.java))
                     config.clearAll()
                     onLogout()
                 }

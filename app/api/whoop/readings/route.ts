@@ -47,15 +47,21 @@ const postSchema = z
   });
 
 /**
- * Same dual-auth shape as POST /api/workouts (lib/auth/webhook.ts) — the mobile/whoop-bridge
- * companion app authenticates with WHOOP_WEBHOOK_TOKEN since it can't hold a browser session.
- * Accepts a batch, not one reading at a time: a historical BLE offload after a pairing gap
- * can be hundreds of records synced in one pass. `sleepSegments` rides in the same batch
- * (not a separate endpoint) since it's the same sync call uploading both — see
+ * The Whoop BLE connection now lives directly in the main LifeOS Android app
+ * (mobile/lifeos-android's WhoopSyncService — mobile/whoop-bridge, the standalone
+ * companion app that originally proved this out, is retired), so it authenticates the
+ * same way every other native-client write in this app does: requireUserOrApiToken's
+ * per-device bearer token, the one issued at login and already used by GET above.
+ * requireUserOrWebhookToken (a single static WHOOP_WEBHOOK_TOKEN, lib/auth/webhook.ts —
+ * the shape POST /api/workouts also uses) is kept as a fallback for any non-interactive
+ * automation that can't hold a logged-in device's token, not the primary path anymore.
+ * Accepts a batch, not one reading at a time: a historical BLE offload after a pairing
+ * gap can be hundreds of records synced in one pass. `sleepSegments` rides in the same
+ * batch (not a separate endpoint) since it's the same sync call uploading both — see
  * lib/sleep/service.ts's recordSleepSegments for how segments become sessions server-side.
  */
 export async function POST(request: Request) {
-  const auth = await requireUserOrWebhookToken(request, "WHOOP_WEBHOOK_TOKEN");
+  const auth = (await requireUserOrApiToken(request)) ?? (await requireUserOrWebhookToken(request, "WHOOP_WEBHOOK_TOKEN"));
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
