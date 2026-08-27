@@ -8,7 +8,7 @@
 //
 // Bump CACHE_NAME when this file's caching logic changes; the old cache is cleaned up on
 // activate.
-const CACHE_NAME = "lifeos-v1";
+const CACHE_NAME = "lifeos-v2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -95,6 +95,17 @@ self.addEventListener("fetch", (event) => {
 
   // Static assets (JS/CSS/images/fonts, including Next's content-hashed build output):
   // cache-first, since a hashed filename never changes meaning once fetched.
+  //
+  // Everything else — in particular the RSC data fetches that <Link> client-side
+  // navigations make (mode is "cors"/"same-origin", never "navigate") — must go to the
+  // network every time. Those responses are session-dependent; caching one means a stale
+  // (or logged-out) response gets replayed forever regardless of the current cookie.
+  const isStaticAsset =
+    url.pathname.startsWith("/_next/static/") ||
+    /\.(?:js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$/.test(url.pathname);
+
+  if (!isStaticAsset) return;
+
   event.respondWith(
     (async () => {
       const cached = await caches.match(request);
