@@ -53,9 +53,21 @@ class LifeosConfig(context: Context) {
 
     fun isLoggedIn(): Boolean = !getBaseUrl().isNullOrEmpty() && !getToken().isNullOrEmpty()
 
+    /**
+     * Off by default — WhoopSyncService trades battery + a permanent notification for a
+     * held-open BLE connection to the strap. Explicit opt-in via the Settings toggle, not
+     * turned on just because the device is logged in.
+     */
+    fun isWhoopSyncEnabled(): Boolean = prefs.getBoolean(KEY_WHOOP_SYNC_ENABLED, false)
+
+    fun setWhoopSyncEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_WHOOP_SYNC_ENABLED, enabled).apply()
+    }
+
     companion object {
         private const val KEY_BASE_URL = "lifeos_base_url"
         private const val KEY_TOKEN = "lifeos_api_token"
         private const val KEY_TOKEN_ID = "lifeos_api_token_id"
+        private const val KEY_WHOOP_SYNC_ENABLED = "whoop_sync_enabled"
     }
 }

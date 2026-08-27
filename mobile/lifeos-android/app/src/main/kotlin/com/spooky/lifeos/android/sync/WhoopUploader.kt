@@ -1,7 +1,7 @@
-package com.spooky.lifeos.whoopbridge.sync
+package com.spooky.lifeos.android.sync
 
-import com.spooky.lifeos.whoopbridge.LifeosConfig
-import com.spooky.lifeos.whoopbridge.db.LocalDb
+import com.spooky.lifeos.android.LifeosConfig
+import com.spooky.lifeos.android.db.WhoopLocalDb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -11,12 +11,14 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * Drains local_db's pending_uploads queue to LifeOS. A batch stays queued — never
- * dropped — until a POST actually returns 2xx, since LifeOS is only reachable over
- * Tailscale and the phone won't always have a route to it. Same behavior as the
- * (now-deleted) Flutter build's uploader.dart.
+ * Drains WhoopLocalDb's pending_uploads queue to LifeOS's own POST /api/whoop/readings. A
+ * batch stays queued — never dropped — until a POST actually returns 2xx, since a Tailscale
+ * route isn't always up. Ported in from mobile/whoop-bridge (now retired) verbatim, except
+ * the bearer token: it's this device's own per-user API token (LifeosConfig.getToken(),
+ * the same one every other Xxx­Client in this package already uses) rather than a separate
+ * shared webhook secret — see the server-side route's requireUserOrApiToken.
  */
-class Uploader(private val config: LifeosConfig, private val db: LocalDb, private val onLog: (String) -> Unit = {}) {
+class WhoopUploader(private val config: LifeosConfig, private val db: WhoopLocalDb, private val onLog: (String) -> Unit = {}) {
     private val client = OkHttpClient.Builder()
         .callTimeout(20, TimeUnit.SECONDS)
         .build()

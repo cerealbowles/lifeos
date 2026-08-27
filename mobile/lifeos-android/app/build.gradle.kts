@@ -1,7 +1,8 @@
 // Dependency versions reused verbatim from mobile/whoop-bridge, where each was already
 // verified live against Google's Maven repo / Maven Central metadata (not guessed) and
-// proven to actually resolve + build together on this machine's toolchain. No BLE library
-// here — this app only talks to LifeOS's own HTTP API.
+// proven to actually resolve + build together on this machine's toolchain. BLE (Nordic +
+// :protocol) was ported in from whoop-bridge — the standalone companion app is retired,
+// LifeOS now owns the strap connection directly (see sync/WhoopSyncService.kt).
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -43,6 +44,13 @@ android {
 }
 
 dependencies {
+    implementation(project(":protocol"))
+
+    // BLE — Nordic Semiconductor's Android-BLE-Library, ported in from whoop-bridge
+    // verbatim (same version, same reasoning: just the core `ble` module, not ble-ktx —
+    // see sync/BleConnect.kt).
+    implementation("no.nordicsemi.android:ble:2.10.1")
+
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
@@ -68,5 +76,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
-    testImplementation(kotlin("test"))
+    // kotlin("test") alone resolves fine for the plain-JVM :protocol module, but this is
+    // an Android module — its unit tests run on real JUnit4, and without this explicit
+    // bridge kotlin.test.Test doesn't resolve at all (found live in whoop-bridge: "Unresolved
+    // reference 'Test'"). kotlin-test-junit maps kotlin.test's annotations/asserts onto JUnit4.
+    testImplementation(kotlin("test-junit"))
 }

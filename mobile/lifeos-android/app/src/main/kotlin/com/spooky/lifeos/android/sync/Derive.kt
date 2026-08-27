@@ -1,6 +1,6 @@
-package com.spooky.lifeos.whoopbridge.sync
+package com.spooky.lifeos.android.sync
 
-import com.spooky.lifeos.whoopbridge.db.LocalDb
+import com.spooky.lifeos.android.db.WhoopLocalDb
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -43,7 +43,7 @@ object DailyDerive {
 
     /**
      * Pure — no Android/db dependency — so this is unit-testable the same way the protocol
-     * layer's CRC/framing math is, unlike `deriveForNow` itself (needs a real LocalDb).
+     * layer's CRC/framing math is, unlike `deriveForNow` itself (needs a real WhoopLocalDb).
      * Takes every RR value from every sample in a window, in chronological order; returns
      * null if the window doesn't have enough trustworthy data to report a value at all
      * (fewer than [MIN_VALID_PAIRS] valid pairs, or the result is still above the sanity
@@ -73,17 +73,44 @@ object DailyDerive {
         return RmssdResult(rmssdMs = rmssd, validPairs = validPairs, plausibleRrCount = plausibleRr.size)
     }
 
-    fun deriveForNow(db: LocalDb): JSONArray {
+    private const val BUCKET_SECONDS = 3600L
+
+    /**
+     * Derives one heart_rate/skin_temp/hrv reading per hour-of-DATA bucket across every
+     * sample not yet covered by a previous derive pass (WhoopLocalDb.getLastDerivedSec), not
+     * just the trailing hour off the latest sample. A single fixed trailing-hour window
+     * silently dropped everything older on every sync that fell behind by more than an
+     * hour — routine in practice, since a background sync needs an active BLE connection
+     * and WorkManager's 15-min periodic request is frequently delayed by Android Doze far
+     * past that. Bucketing (rather than one giant window for the whole gap) keeps each
+     * reading's cadence — and HRV's Malik-filtered pair count — the same as if a sync had
+     * actually run every hour, instead of flattening a multi-hour backlog into one point.
+     */
+    fun deriveForNow(db: WhoopLocalDb): JSONArray {
         val readings = JSONArray()
         // Anchor on the latest sample actually present, NOT wall-clock now — a first
         // sync (or any sync after a gap) drains the strap's own backlog, and those
         // records carry real PAST timestamps from when they were recorded, not close
-        // to "now." See LocalDb.latestSampleSec's doc for how this was found live.
+        // to "now." See WhoopLocalDb.latestSampleSec's doc for how this was found live.
         val latestSec = db.latestSampleSec() ?: return readings
-        val windowStart = latestSec - 3600 // last hour of DATA, not last hour of wall-clock
+        // No watermark yet (first-ever sync) — nothing to widen from, so fall back to
+        // the same trailing-hour window as before.
+        val windowStart = (db.getLastDerivedSec() ?: (latestSec - BUCKET_SECONDS)) + 1
+        if (windowStart > latestSec) return readings
 
-        val samples = db.samplesInRange(windowStart, latestSec)
-        if (samples.isEmpty()) return readings
+        var bucketStart = windowStart
+        while (bucketStart <= latestSec) {
+            val bucketEnd = minOf(bucketStart + BUCKET_SECONDS - 1, latestSec)
+            deriveBucket(db, bucketStart, bucketEnd, readings)
+            bucketStart = bucketEnd + 1
+        }
+
+        return readings
+    }
+
+    private fun deriveBucket(db: WhoopLocalDb, bucketStart: Long, bucketEnd: Long, readings: JSONArray) {
+        val samples = db.samplesInRange(bucketStart, bucketEnd)
+        if (samples.isEmpty()) return
 
         samples.lastOrNull { it.hr != null }?.let { s ->
             readings.put(
@@ -126,7 +153,5 @@ object DailyDerive {
                     ),
             )
         }
-
-        return readings
     }
 }

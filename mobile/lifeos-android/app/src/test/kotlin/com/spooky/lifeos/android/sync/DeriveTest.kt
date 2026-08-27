@@ -1,4 +1,4 @@
-package com.spooky.lifeos.whoopbridge.sync
+package com.spooky.lifeos.android.sync
 
 import kotlin.math.round
 import kotlin.math.sqrt

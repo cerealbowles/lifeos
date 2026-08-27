@@ -1,11 +1,11 @@
-package com.spooky.lifeos.whoopbridge.ble
+package com.spooky.lifeos.android.ble
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
 import android.content.Context
-import com.spooky.lifeos.whoopbridge.db.LocalDb
+import com.spooky.lifeos.android.db.WhoopLocalDb
 import com.spooky.lifeos.whoopbridge.protocol.BandProfile
 import com.spooky.lifeos.whoopbridge.protocol.DeviceType
 import com.spooky.lifeos.whoopbridge.protocol.Frame
@@ -38,7 +38,7 @@ import java.util.UUID
 class WhoopBleManager(
     context: Context,
     private val deviceType: DeviceType,
-    private val localDb: LocalDb,
+    private val localDb: WhoopLocalDb,
     private val onLog: (String) -> Unit = {},
 ) : BleManager(context) {
 
@@ -52,6 +52,17 @@ class WhoopBleManager(
 
     private var seq = 0
     private fun nextSeq(): Int = (seq++) and 0xFF
+
+    /**
+     * Flips false when the GATT link drops (see onServicesInvalidated below) — the only
+     * connection-state signal this app relies on, deliberately not a full ConnectionObserver
+     * (whose exact callback set on this library version wasn't independently verified, same
+     * "don't guess an API surface" discipline as BleConnect.kt skipping ble-ktx's `.suspend()`
+     * extension). WhoopSyncService polls this to know when to reconnect instead.
+     */
+    @Volatile
+    var isLinkActive: Boolean = true
+        private set
 
     override fun getGattCallback(): BleManagerGattCallback = object : BleManagerGattCallback() {
         override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
@@ -82,6 +93,7 @@ class WhoopBleManager(
             cmdFromChar = null
             eventsChar = null
             dataChar = null
+            isLinkActive = false
         }
     }
 

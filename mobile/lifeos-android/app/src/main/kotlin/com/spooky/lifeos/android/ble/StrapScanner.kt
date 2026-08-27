@@ -1,4 +1,4 @@
-package com.spooky.lifeos.whoopbridge.ble
+package com.spooky.lifeos.android.ble
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice

@@ -1,5 +1,0 @@
-<resources>
-    <!-- Compose renders its own Material3 theming (see MainActivity's WhoopBridgeTheme) —
-         this platform theme only needs to set the pre-Compose window background/splash. -->
-    <style name="Theme.WhoopBridge" parent="android:Theme.Material.Light.NoActionBar" />
-</resources>

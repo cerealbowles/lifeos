@@ -1,6 +1,6 @@
-package com.spooky.lifeos.whoopbridge.sync
+package com.spooky.lifeos.android.sync
 
-import com.spooky.lifeos.whoopbridge.db.LocalDb
+import com.spooky.lifeos.android.db.WhoopLocalDb
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -15,7 +15,7 @@ import java.time.Instant
  * see; see LifeOS's lib/sleep/service.ts `recordSleepSegments`. This only groups runs
  * within one derive window, mirroring `DailyDerive`'s own `latestSampleSec()`-anchored
  * windowing exactly (a first sync after a gap has real past timestamps, not wall-clock
- * "now" — see LocalDb.latestSampleSec's doc for how that was found live).
+ * "now" — see WhoopLocalDb.latestSampleSec's doc for how that was found live).
  */
 object SleepDerive {
     data class StageSegment(val stage: String, val startedAtSec: Long, val endedAtSec: Long)
@@ -47,10 +47,17 @@ object SleepDerive {
         return segments
     }
 
-    fun deriveSegments(db: LocalDb): JSONArray {
+    fun deriveSegments(db: WhoopLocalDb): JSONArray {
         val out = JSONArray()
         val latestSec = db.latestSampleSec() ?: return out
-        val windowStart = latestSec - 3600 // same hour-of-data window as DailyDerive
+        // Everything since the last derive pass (WhoopLocalDb.getLastDerivedSec), not just the
+        // trailing hour — a fixed 1-hour window meant a full ~8h night of sleep was almost
+        // never actually captured, only whatever sliver happened to fall in the hour right
+        // before a sync ran. Unlike DailyDerive this doesn't need hourly bucketing:
+        // computeSegments already collapses an arbitrary-length run of samples into a
+        // handful of contiguous stage segments regardless of how wide the window is.
+        val windowStart = (db.getLastDerivedSec() ?: (latestSec - 3600)) + 1
+        if (windowStart > latestSec) return out
 
         val samplesInOrder = db.samplesInRange(windowStart, latestSec)
             .mapNotNull { s -> s.sleepState?.let { s.tsSec to it.lowercase() } }

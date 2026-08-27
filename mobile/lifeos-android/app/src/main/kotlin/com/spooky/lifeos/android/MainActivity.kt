@@ -1,8 +1,12 @@
 package com.spooky.lifeos.android
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -60,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.spooky.lifeos.android.db.TodayCache
 import com.spooky.lifeos.android.sync.AuthClient
 import com.spooky.lifeos.android.sync.LoginResult
@@ -71,6 +76,7 @@ import com.spooky.lifeos.android.sync.isCompletable
 import com.spooky.lifeos.android.sync.TodayFetchResult
 import com.spooky.lifeos.android.sync.TodayRefreshWorker
 import com.spooky.lifeos.android.sync.WeatherClient
+import com.spooky.lifeos.android.sync.WhoopSyncService
 import com.spooky.lifeos.android.ui.environment.EnvironmentalBackground
 import com.spooky.lifeos.android.ui.DueBadge
 import com.spooky.lifeos.android.ui.LifeosColors
@@ -92,6 +98,29 @@ import java.util.concurrent.TimeUnit
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // BLE (for WhoopSyncService) + notifications (its persistent foreground-service
+        // notification) — requested unconditionally at launch like the rest of this app's
+        // permissions, not deferred until the Settings toggle is flipped, so a first-time
+        // "enable Whoop sync" tap doesn't itself need a separate permission round-trip.
+        val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+        val permissions = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions += Manifest.permission.BLUETOOTH_SCAN
+            permissions += Manifest.permission.BLUETOOTH_CONNECT
+        } else {
+            permissions += Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions += Manifest.permission.POST_NOTIFICATIONS
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
+
+        val config = LifeosConfig(applicationContext)
+        if (config.isWhoopSyncEnabled() && config.isLoggedIn()) {
+            ContextCompat.startForegroundService(this, Intent(this, WhoopSyncService::class.java))
+        }
+
         setContent {
             MaterialTheme(colorScheme = lifeosDarkColorScheme(), typography = com.spooky.lifeos.android.ui.LifeTypography) {
                 // Reference art comparison (3 inspiration screenshots, confirmed against this

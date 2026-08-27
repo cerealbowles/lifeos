@@ -1,4 +1,4 @@
-package com.spooky.lifeos.whoopbridge.db
+package com.spooky.lifeos.android.db
 
 import android.content.ContentValues
 import android.content.Context
@@ -8,12 +8,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Local-only storage — same two-table shape as the (now-deleted) Flutter build's
- * sqflite schema: raw decoded samples (for building the JSON batches LifeOS
- * expects) and a pending-upload queue (since LifeOS is only reachable over
- * Tailscale, a batch stays queued until a POST actually succeeds).
+ * Local-only storage for the strap's BLE offload — ported in from the now-retired
+ * mobile/whoop-bridge companion app verbatim (same schema, same reasoning): raw decoded
+ * samples (for building the JSON batches LifeOS expects) and a pending-upload queue (a
+ * batch stays queued until a POST actually succeeds, same as every other sync client in
+ * this app). Its own separate SQLite file/schema from TasksDb/TodayCache — no shared
+ * tables, no reason to merge them.
  */
-class LocalDb(context: Context) : SQLiteOpenHelper(context, "whoop_bridge.db", null, 2) {
+class WhoopLocalDb(context: Context) : SQLiteOpenHelper(context, "lifeos_whoop.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -38,6 +40,14 @@ class LocalDb(context: Context) : SQLiteOpenHelper(context, "whoop_bridge.db", n
             )
             """.trimIndent(),
         )
+        db.execSQL(
+            """
+            CREATE TABLE derive_state (
+                id INTEGER PRIMARY KEY CHECK (id = 0),
+                last_derived_sec INTEGER
+            )
+            """.trimIndent(),
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -48,6 +58,23 @@ class LocalDb(context: Context) : SQLiteOpenHelper(context, "whoop_bridge.db", n
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE raw_samples ADD COLUMN skin_temp_c REAL")
             db.execSQL("ALTER TABLE raw_samples ADD COLUMN sleep_state TEXT")
+        }
+        // v2 -> v3: derive/deriveSegments used to always window off "latest sample - 1
+        // hour," silently dropping everything older every single sync — found live: a
+        // background sync delayed by Android Doze (routine for a 15-min WorkManager
+        // request that needs an active BLE connection) means most syncs have way more
+        // than an hour of new data queued up, and a full ~8h night of sleep is almost
+        // never captured by a 1-hour trailing window at all. This watermark lets derive
+        // pick up from wherever the last derive left off instead.
+        if (oldVersion < 3) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS derive_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 0),
+                    last_derived_sec INTEGER
+                )
+                """.trimIndent(),
+            )
         }
     }
 
@@ -145,6 +172,22 @@ class LocalDb(context: Context) : SQLiteOpenHelper(context, "whoop_bridge.db", n
 
     fun deleteUpload(id: Long) {
         writableDatabase.delete("pending_uploads", "id = ?", arrayOf(id.toString()))
+    }
+
+    /** High-water mark: the newest sample timestamp already covered by a derive pass. */
+    fun getLastDerivedSec(): Long? {
+        readableDatabase.rawQuery("SELECT last_derived_sec FROM derive_state WHERE id = 0", null).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0)
+        }
+        return null
+    }
+
+    fun setLastDerivedSec(sec: Long) {
+        val values = ContentValues().apply {
+            put("id", 0)
+            put("last_derived_sec", sec)
+        }
+        writableDatabase.insertWithOnConflict("derive_state", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 }
 
