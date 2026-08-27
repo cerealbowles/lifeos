@@ -1,8 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useMutation } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DueBadge } from "@/components/dashboard/due-badge";
 import { DomainAvatar, domainMeta } from "@/components/dashboard/domain-icon";
+import { CollapsibleItem } from "@/components/dashboard/collapsible-item";
+import { useCollapseThen } from "@/lib/hooks/use-collapse-then";
+import { getCompleteRequest } from "@/lib/today/complete";
 import { formatInUserZone } from "@/lib/format";
 import type { CandidateDomain, RankedItem } from "@/lib/today/ranking";
 
@@ -42,6 +51,18 @@ export function TodayGroupCard({
   overflow?: number;
   timezone: string;
 }) {
+  const router = useRouter();
+  const { collapseThen, isCollapsing } = useCollapseThen();
+
+  const complete = useMutation({
+    mutationFn: (item: RankedItem) => {
+      const req = getCompleteRequest(item);
+      if (!req) return Promise.resolve();
+      return apiFetch(req.url, req.init);
+    },
+    onSuccess: () => router.refresh(),
+  });
+
   if (items.length === 0) return null;
 
   return (
@@ -51,33 +72,46 @@ export function TodayGroupCard({
       </CardHeader>
       <CardContent className="p-2 pt-0">
         <ul className="flex flex-col">
-          {items.map((item) => (
-            <li key={item.id}>
-              <Link
-                href={domainMeta(domain).href}
-                className="flex items-center gap-3 rounded-lg p-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
-              >
-                <DomainAvatar domain={domain} tone="muted" />
-                <span className="flex-1 truncate">
-                  <span className="block truncate font-medium">{item.title}</span>
-                  {item.subtitle && (
-                    <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
-                      {item.subtitle}
-                    </span>
+          {items.map((item) => {
+            const completable = getCompleteRequest(item) !== null;
+            return (
+              <CollapsibleItem key={item.id} collapsed={isCollapsing(item.id)}>
+                <div className="flex items-center gap-1">
+                  {completable && (
+                    <Checkbox
+                      checked={false}
+                      disabled={complete.isPending}
+                      onChange={() => collapseThen(item.id, () => complete.mutate(item))}
+                      className="ml-2"
+                    />
                   )}
-                </span>
-                {item.dueAt && (
-                  <div className="flex flex-col items-end gap-0.5">
-                    <span className="text-xs text-neutral-400">
-                      {formatItemDate(item.dueAt, timezone, domain)}
+                  <Link
+                    href={item.href ?? domainMeta(domain).href}
+                    className="flex flex-1 items-center gap-3 rounded-lg p-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+                  >
+                    <DomainAvatar domain={domain} tone="muted" />
+                    <span className="flex-1 truncate">
+                      <span className="block truncate font-medium">{item.title}</span>
+                      {item.subtitle && (
+                        <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                          {item.subtitle}
+                        </span>
+                      )}
                     </span>
-                    <DueBadge due={item.due} domain={domain} live={item.live} />
-                  </div>
-                )}
-                <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
-              </Link>
-            </li>
-          ))}
+                    {item.dueAt && (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-xs text-neutral-400">
+                          {formatItemDate(item.dueAt, timezone, domain)}
+                        </span>
+                        <DueBadge due={item.due} domain={domain} live={item.live} />
+                      </div>
+                    )}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-neutral-300 dark:text-neutral-600" />
+                  </Link>
+                </div>
+              </CollapsibleItem>
+            );
+          })}
           {overflow > 0 && (
             <li>
               <Link

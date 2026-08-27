@@ -144,6 +144,7 @@ export async function getTodayOverview(user: User, now: Date = new Date()): Prom
         dueAt: row.event.scheduledAt,
         eventType: row.event.eventType,
         subtitle: row.petName,
+        href: `/pets/${row.event.petId}`,
       }),
     ),
     ...upcomingReminders.map(
@@ -200,6 +201,7 @@ export async function getTodayOverview(user: User, now: Date = new Date()): Prom
         dueAt: b.date,
         eventType: "birthday",
         subtitle: b.pet.name,
+        href: `/pets/${b.pet.id}`,
       }),
     ),
     ...plantsNeedingChecks.map(
@@ -208,6 +210,7 @@ export async function getTodayOverview(user: User, now: Date = new Date()): Prom
         domain: "grow",
         title: `Check ${p.strain} — day ${dayCount(p.datePlanted, todayDateStr)}`,
         dueAt: nextCheckDue(p.datePlanted, p.lastCheckedAt),
+        href: `/grow/${p.id}`,
       }),
     ),
   ];

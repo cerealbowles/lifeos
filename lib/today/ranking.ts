@@ -12,6 +12,13 @@ type BaseCandidateInput = {
   id: string;
   title: string;
   dueAt: Date | null;
+  /**
+   * Deep link to this item's own record, when one exists (e.g. a specific pet or grow plant
+   * page) — falls back to the domain's hub page (`domainMeta(domain).href`) when omitted.
+   * Only worth setting for domains with a real per-record detail page; task/routine/financial/
+   * calendar/sports have no such page today, so their candidates leave this unset.
+   */
+  href?: string;
 };
 
 export type TaskCandidateInput = BaseCandidateInput & {
@@ -70,6 +77,8 @@ export type RankedItem = {
   dueAt: Date | null;
   due: DueSummary;
   score: number;
+  /** See BaseCandidateInput.href. */
+  href?: string;
   /** Only set for domain === "pet". DECISIONS.md ADR-100 — "birthday" is a computed
    *  occurrence with no underlying pet_events row, so it's the one pet-domain NOW item that
    *  can't be swipe-completed; real event types can. */
@@ -160,6 +169,7 @@ export function scoreCandidate(input: CandidateInput, now: Date = new Date(), ti
     dueAt: input.dueAt,
     due,
     score: urgency + importancePoints(input) + exceptionBonus(due),
+    href: input.href,
     eventType: input.domain === "pet" ? input.eventType : undefined,
     live: input.domain === "sports" ? input.live : undefined,
   };
