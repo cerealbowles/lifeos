@@ -79,9 +79,11 @@ import com.spooky.lifeos.android.sync.WeatherClient
 import com.spooky.lifeos.android.sync.WhoopSyncService
 import com.spooky.lifeos.android.ui.environment.EnvironmentalBackground
 import com.spooky.lifeos.android.ui.DueBadge
+import com.spooky.lifeos.android.ui.ItemDetailSheet
 import com.spooky.lifeos.android.ui.LifeosColors
 import com.spooky.lifeos.android.ui.PulseIndicator
 import com.spooky.lifeos.android.ui.SwipeToCompleteRow
+import com.spooky.lifeos.android.ui.itemOpensSheet
 import com.spooky.lifeos.android.ui.motion.Motion
 import com.spooky.lifeos.android.ui.TasksScreen
 import com.spooky.lifeos.android.ui.TodayItemRow
@@ -397,6 +399,7 @@ fun TodayScreen() {
     var offlineNotice by remember { mutableStateOf<String?>(null) }
     var loadedOnce by remember { mutableStateOf(false) }
     var weather by remember { mutableStateOf<WeatherView?>(null) }
+    var openItem by remember { mutableStateOf<com.spooky.lifeos.android.ui.TodayItem?>(null) }
 
     fun loadFromCache() {
         cache.load()?.let { cached ->
@@ -500,9 +503,19 @@ fun TodayScreen() {
                                             }
                                         }
                                     },
-                                ) { TodayItemRow(todayItem, vividAvatar = true) }
+                                ) {
+                                    TodayItemRow(
+                                        todayItem,
+                                        vividAvatar = true,
+                                        onClick = { openItem = todayItem }.takeIf { itemOpensSheet(todayItem) },
+                                    )
+                                }
                             } else {
-                                TodayItemRow(todayItem, vividAvatar = true)
+                                TodayItemRow(
+                                    todayItem,
+                                    vividAvatar = true,
+                                    onClick = { openItem = todayItem }.takeIf { itemOpensSheet(todayItem) },
+                                )
                             }
                         }
                     }
@@ -512,7 +525,11 @@ fun TodayScreen() {
                         item(key = "header-$domain") { SectionHeader(domainLabel(domain).uppercase(), count = domainItems.size) }
                         itemsIndexed(domainItems, key = { _, it -> "today-$domain-${it.id}" }) { index, item ->
                             com.spooky.lifeos.android.ui.motion.StaggeredEntrance(index = index) {
-                                TodayItemRow(item, vividAvatar = false)
+                                TodayItemRow(
+                                    item,
+                                    vividAvatar = false,
+                                    onClick = { openItem = item }.takeIf { itemOpensSheet(item) },
+                                )
                             }
                         }
                     }
@@ -525,6 +542,17 @@ fun TodayScreen() {
             }
         }
     }
+
+    ItemDetailSheet(
+        item = openItem,
+        baseUrl = config.getBaseUrl(),
+        token = config.getToken(),
+        onDismiss = { openItem = null },
+        onCheckedIn = {
+            openItem = null
+            refresh()
+        },
+    )
 }
 
 /** Thin wrapper over the shared `ui/components/SectionHeader` — keeps this file's existing

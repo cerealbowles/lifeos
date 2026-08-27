@@ -7,6 +7,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 private data class CompletionRequest(val method: String, val path: String, val body: String?)
@@ -49,4 +50,32 @@ class TodayActionsClient(private val baseUrl: String, private val token: String)
             ApiResult.Failure("${e::class.simpleName}: ${e.message}")
         }
     }
+
+    /**
+     * The Home detail sheet's "real" check-in (ItemDetailSheet.kt's GrowCheckInForm) — same
+     * endpoint `complete()` already hits with an empty body for swipe-to-complete, but with the
+     * fields the sheet actually collects. All three stay optional/omittable (matching the
+     * server's checkInSchema — app/api/grow/[id]/check-in/route.ts) so a field the user didn't
+     * touch in the sheet is left alone server-side rather than overwritten with an empty value.
+     */
+    suspend fun checkInPlant(id: String, stage: String?, trichomeStatus: String?, notes: String?): ApiResult<Unit> =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().apply {
+                stage?.let { put("stage", it) }
+                trichomeStatus?.let { put("trichomeStatus", it) }
+                notes?.let { put("notes", it) }
+            }
+            try {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/grow/$id/check-in")
+                    .header("Authorization", "Bearer $token")
+                    .post(payload.toString().toRequestBody(jsonMedia))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) ApiResult.Success(Unit) else ApiResult.Failure("HTTP ${response.code}")
+                }
+            } catch (e: Exception) {
+                ApiResult.Failure("${e::class.simpleName}: ${e.message}")
+            }
+        }
 }

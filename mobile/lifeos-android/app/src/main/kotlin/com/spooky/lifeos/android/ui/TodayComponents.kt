@@ -119,10 +119,14 @@ fun DueBadge(dueStatus: String?, daysDelta: Int?, live: Boolean, domain: String?
  * One NOW/TODAY row — domain avatar + title/subtitle + due badge, same layout as the web
  * app's row, rendered on the shared [com.spooky.lifeos.android.ui.components.LifeCard]
  * "frosted glass" panel treatment (translucent fill + faint light border, no shadow).
+ *
+ * `onClick` is null for every domain except grow/sports (see ItemDetailSheet.kt's
+ * `itemOpensSheet`) — everything else has no detail screen to open yet, matching the web app's
+ * "only wire what actually opens something" boundary rather than a dead ripple on every row.
  */
 @Composable
-fun TodayItemRow(item: TodayItem, vividAvatar: Boolean) {
-    com.spooky.lifeos.android.ui.components.LifeCard(modifier = Modifier, contentPadding = 0.dp) {
+fun TodayItemRow(item: TodayItem, vividAvatar: Boolean, onClick: (() -> Unit)? = null) {
+    com.spooky.lifeos.android.ui.components.LifeCard(modifier = Modifier, onClick = onClick, contentPadding = 0.dp) {
         Row(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
