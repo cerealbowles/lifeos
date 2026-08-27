@@ -73,18 +73,28 @@ object DailyDerive {
         return RmssdResult(rmssdMs = rmssd, validPairs = validPairs, plausibleRrCount = plausibleRr.size)
     }
 
-    private const val BUCKET_SECONDS = 3600L
+    // heart_rate/skin_temp bucket size — was 3600s (1hr) for both this and HRV together, which
+    // meant a chart could never show more than one point per hour no matter how often derive
+    // ran. HR is reported ~every second with no filtering needed, so it can bucket this fine.
+    private const val HR_BUCKET_SECONDS = 60L
+    // HRV can't bucket this fine: the strap only reports an RR interval on ~15% of seconds, and
+    // computeRmssd needs MIN_VALID_PAIRS before it'll trust a result at all — a 60s bucket
+    // mostly returns null. Instead HRV is a trailing rolling window recomputed at the end of
+    // every HR bucket, so it still updates every derive pass, just smoothed over enough RR
+    // samples to be reliable (~5 min gets comfortably past MIN_VALID_PAIRS in practice).
+    private const val HRV_LOOKBACK_SECONDS = 300L
 
     /**
-     * Derives one heart_rate/skin_temp/hrv reading per hour-of-DATA bucket across every
-     * sample not yet covered by a previous derive pass (WhoopLocalDb.getLastDerivedSec), not
-     * just the trailing hour off the latest sample. A single fixed trailing-hour window
-     * silently dropped everything older on every sync that fell behind by more than an
-     * hour — routine in practice, since a background sync needs an active BLE connection
-     * and WorkManager's 15-min periodic request is frequently delayed by Android Doze far
-     * past that. Bucketing (rather than one giant window for the whole gap) keeps each
-     * reading's cadence — and HRV's Malik-filtered pair count — the same as if a sync had
-     * actually run every hour, instead of flattening a multi-hour backlog into one point.
+     * Derives heart_rate/skin_temp per HR_BUCKET_SECONDS-of-DATA bucket, and hrv per trailing
+     * HRV_LOOKBACK_SECONDS window ending at each bucket, across every sample not yet covered by
+     * a previous derive pass (WhoopLocalDb.getLastDerivedSec) — not just the trailing window off
+     * the latest sample. A single fixed trailing window silently dropped everything older on
+     * every sync that fell behind — routine in practice, since a background sync needs an
+     * active BLE connection and WorkManager's 15-min periodic request is frequently delayed by
+     * Android Doze far past that. Bucketing (rather than one giant window for the whole gap)
+     * keeps each reading's cadence — and HRV's Malik-filtered pair count — the same as if a
+     * sync had actually run on schedule, instead of flattening a multi-hour backlog into one
+     * point.
      */
     fun deriveForNow(db: WhoopLocalDb): JSONArray {
         val readings = JSONArray()
@@ -94,21 +104,22 @@ object DailyDerive {
         // to "now." See WhoopLocalDb.latestSampleSec's doc for how this was found live.
         val latestSec = db.latestSampleSec() ?: return readings
         // No watermark yet (first-ever sync) — nothing to widen from, so fall back to
-        // the same trailing-hour window as before.
-        val windowStart = (db.getLastDerivedSec() ?: (latestSec - BUCKET_SECONDS)) + 1
+        // the same trailing-bucket window as before.
+        val windowStart = (db.getLastDerivedSec() ?: (latestSec - HR_BUCKET_SECONDS)) + 1
         if (windowStart > latestSec) return readings
 
         var bucketStart = windowStart
         while (bucketStart <= latestSec) {
-            val bucketEnd = minOf(bucketStart + BUCKET_SECONDS - 1, latestSec)
-            deriveBucket(db, bucketStart, bucketEnd, readings)
+            val bucketEnd = minOf(bucketStart + HR_BUCKET_SECONDS - 1, latestSec)
+            deriveHeartRateAndSkinTemp(db, bucketStart, bucketEnd, readings)
+            deriveHrv(db, bucketEnd, readings)
             bucketStart = bucketEnd + 1
         }
 
         return readings
     }
 
-    private fun deriveBucket(db: WhoopLocalDb, bucketStart: Long, bucketEnd: Long, readings: JSONArray) {
+    private fun deriveHeartRateAndSkinTemp(db: WhoopLocalDb, bucketStart: Long, bucketEnd: Long, readings: JSONArray) {
         val samples = db.samplesInRange(bucketStart, bucketEnd)
         if (samples.isEmpty()) return
 
@@ -135,7 +146,11 @@ object DailyDerive {
                     .put("measuredAt", Instant.ofEpochSecond(s.tsSec).toString()),
             )
         }
+    }
 
+    private fun deriveHrv(db: WhoopLocalDb, atSec: Long, readings: JSONArray) {
+        val samples = db.samplesInRange(atSec - HRV_LOOKBACK_SECONDS + 1, atSec)
+        if (samples.isEmpty()) return
         val rrValuesInOrder = samples.flatMap { it.rrMs }
         computeRmssd(rrValuesInOrder)?.let { result ->
             readings.put(
@@ -143,7 +158,7 @@ object DailyDerive {
                     .put("type", "hrv")
                     .put("value", result.rmssdMs)
                     .put("unit", "ms")
-                    .put("measuredAt", Instant.ofEpochSecond(samples.last().tsSec).toString())
+                    .put("measuredAt", Instant.ofEpochSecond(atSec).toString())
                     .put(
                         "metadata",
                         JSONObject()

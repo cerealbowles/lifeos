@@ -182,7 +182,13 @@ class WhoopSyncService : Service() {
         private const val CHANNEL_ID = "whoop_sync"
         private const val NOTIFICATION_ID = 1
         private const val LINK_CHECK_INTERVAL_MS = 30_000L
-        private const val DERIVE_INTERVAL_MS = 10 * 60 * 1000L
+        // Matches Derive.HR_BUCKET_SECONDS (60s) — heart rate is reported ~every second with
+        // no filtering needed, so there's no reason to sit on a fresh bucket for 10 minutes
+        // before uploading it once the connection is already held open continuously anyway.
+        // HRV still needs several minutes of RR samples to be reliable (see Derive.kt), but
+        // it's computed as a rolling trailing window each call, so it benefits from the
+        // tighter interval too instead of being tied to how often HR happens to update.
+        private const val DERIVE_INTERVAL_MS = 60 * 1000L
         private const val RECONNECT_DELAY_MS = 10_000L
     }
 }

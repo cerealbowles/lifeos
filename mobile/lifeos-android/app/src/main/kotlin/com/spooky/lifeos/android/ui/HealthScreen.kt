@@ -89,11 +89,11 @@ fun HealthScreen() {
         }
         val measurementsClient = MeasurementsClient(baseUrl, token)
         when (val result = measurementsClient.trend("heart_rate")) {
-            is ApiResult.Success -> heartRateTrend = lastMinutes(result.value, 30)
+            is ApiResult.Success -> heartRateTrend = lastMinutes(result.value, TREND_WINDOW_MINUTES)
             is ApiResult.Failure -> heartRateTrendError = result.message
         }
         when (val result = measurementsClient.trend("hrv")) {
-            is ApiResult.Success -> hrvTrend = lastMinutes(result.value, 30)
+            is ApiResult.Success -> hrvTrend = lastMinutes(result.value, TREND_WINDOW_MINUTES)
             is ApiResult.Failure -> hrvTrendError = result.message
         }
         when (val result = SleepClient(baseUrl, token).skinTempBaseline()) {
@@ -180,7 +180,7 @@ private fun HealthScreenBody(
             item {
                 TrendCard {
                     if (heartRateTrendError != null) ErrorLine("Couldn't load — $heartRateTrendError")
-                    else TrendLineChart(heartRateTrend ?: emptyList(), "bpm", emptyLabel = "No readings in the last 30 min")
+                    else TrendLineChart(heartRateTrend ?: emptyList(), "bpm", emptyLabel = "No readings yet")
                 }
             }
 
@@ -188,7 +188,7 @@ private fun HealthScreenBody(
             item {
                 TrendCard {
                     if (hrvTrendError != null) ErrorLine("Couldn't load — $hrvTrendError")
-                    else TrendLineChart(hrvTrend ?: emptyList(), "ms", emptyLabel = "No readings in the last 30 min")
+                    else TrendLineChart(hrvTrend ?: emptyList(), "ms", emptyLabel = "No readings yet")
                 }
             }
 
@@ -270,13 +270,24 @@ private fun WhoopReadingCell(type: String, reading: WhoopReading) {
     }
 }
 
+private const val TREND_WINDOW_MINUTES = 30L
+
 /**
- * Windows to the last N minutes client-side rather than plumbing a new minute-granularity
- * range through /api/measurements (which only offers day/month buckets — 30d/90d/6m/12m/all,
- * see MEASUREMENT_RANGES) — a quick, explicitly "for now" narrowing, not a real feature.
+ * Windows to the last N minutes of DATA WE HAVE, not wall-clock now — anchored on the latest
+ * point's own timestamp rather than Instant.now(). Anchoring on "now" meant any gap since the
+ * last successful derive/upload (BLE reconnect, Doze, phone out of range — all routine) made
+ * the chart go blank even though the table had recent-ish readings sitting just outside the
+ * window (found live: "not showing recent trending data" with real rows present). Anchoring on
+ * the latest available point instead always shows the most recent slice we actually have.
+ *
+ * Windows client-side rather than plumbing a new minute-granularity range through
+ * /api/measurements (which only offers day/month buckets — 30d/90d/6m/12m/all, see
+ * MEASUREMENT_RANGES) — a quick, explicitly "for now" narrowing, not a real feature.
  */
 private fun lastMinutes(points: List<TrendPoint>, minutes: Long): List<TrendPoint> {
-    val cutoff = Instant.now().minus(minutes, ChronoUnit.MINUTES)
+    val latest = points.mapNotNull { p -> runCatching { Instant.parse(p.measuredAt) }.getOrNull() }.maxOrNull()
+        ?: return emptyList()
+    val cutoff = latest.minus(minutes, ChronoUnit.MINUTES)
     return points.filter { p -> runCatching { Instant.parse(p.measuredAt) }.getOrNull()?.isAfter(cutoff) == true }
 }
 
