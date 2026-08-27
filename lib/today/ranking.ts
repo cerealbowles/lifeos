@@ -1,5 +1,6 @@
 import { getDueSummary, type DueSummary } from "@/lib/tasks/status";
 import type { PetEventType } from "@/lib/db/schema";
+import type { GameDTO } from "@/lib/sports/types";
 
 /**
  * Implements the algorithm in UX_PRIORITIZATION.md. Keep the two in sync —
@@ -54,6 +55,9 @@ export type SportsCandidateInput = BaseCandidateInput & {
   /** DECISIONS.md ADR-107 — a currently-in-progress game for a favorited team. Crosses into
    *  NOW (see importancePoints below); a merely scheduled game does not. */
   live?: boolean;
+  /** The full game record, so the Home detail sheet can show score/odds/boxscore without a
+   *  second fetch — sports has no stable per-game id/route to look one back up by. */
+  game?: GameDTO;
 };
 
 export type GrowCandidateInput = BaseCandidateInput & {
@@ -85,6 +89,8 @@ export type RankedItem = {
   eventType?: PetEventType | "birthday";
   /** Only set for domain === "sports" — see SportsCandidateInput.live. */
   live?: boolean;
+  /** Only set for domain === "sports" — see SportsCandidateInput.game. */
+  game?: GameDTO;
 };
 
 const NOW_THRESHOLD = 70;
@@ -172,6 +178,7 @@ export function scoreCandidate(input: CandidateInput, now: Date = new Date(), ti
     href: input.href,
     eventType: input.domain === "pet" ? input.eventType : undefined,
     live: input.domain === "sports" ? input.live : undefined,
+    game: input.domain === "sports" ? input.game : undefined,
   };
 }
 

@@ -191,6 +191,7 @@ export async function getTodayOverview(user: User, now: Date = new Date()): Prom
             ? `${g.sport.toUpperCase()} · ${g.awayScore}-${g.homeScore}${g.period ? ` · ${g.period}` : ""}`
             : g.sport.toUpperCase(),
         live,
+        game: g,
       };
     }),
     ...upcomingBirthdays.map(
