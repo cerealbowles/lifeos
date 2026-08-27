@@ -23,6 +23,7 @@ export function toGameDTO(game: BettingGame, favoriteKeys: Set<string>): GameDTO
     startAt: game.startAt,
     odds: game.odds,
     isFavorite: favoriteKeys.has(`${game.sport}:${game.homeTeam}`) || favoriteKeys.has(`${game.sport}:${game.awayTeam}`),
+    gamePk: game.gamePk,
   };
 }
 
