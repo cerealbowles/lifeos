@@ -172,6 +172,11 @@ private fun HealthScreenBody(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
+            // Deliberate narrative order, not the original fetch order: "right now" vitals
+            // first (the NOW layer), then last night's sleep (the thing a morning check of
+            // this screen is usually actually for), then the one truly actionable section
+            // (logging a workout), then the more diagnostic trend/baseline context last,
+            // since those are read-only background, not something to act on.
             item {
                 if (readings == null) {
                     CircularProgressIndicator(color = LifeosColors.accent)
@@ -184,6 +189,14 @@ private fun HealthScreenBody(
                 } else {
                     WhoopReadingsGrid(entries)
                 }
+            }
+
+            item {
+                SleepLogCard(
+                    sharedTransitionScope = sharedTransitionScope,
+                    animatedVisibilityScope = animatedVisibilityScope,
+                    onSelectSession = onSelectSleepSession,
+                )
             }
 
             item { SectionLabel("Workouts") }
@@ -229,14 +242,6 @@ private fun HealthScreenBody(
                     skinTempBaseline != null -> SkinTempCard(skinTempBaseline!!)
                     else -> CircularProgressIndicator(color = LifeosColors.accent)
                 }
-            }
-
-            item {
-                SleepLogCard(
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    onSelectSession = onSelectSleepSession,
-                )
             }
         }
     }
