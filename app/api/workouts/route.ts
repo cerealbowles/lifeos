@@ -4,12 +4,13 @@ import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { requireUserOrNull } from "@/lib/auth/guards";
 import { requireUserOrWebhookToken } from "@/lib/auth/webhook";
 import { createWorkout, listWorkouts } from "@/lib/workouts/service";
+import type { User } from "@/lib/db/schema";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const workouts = await listWorkouts(user.id);
+  const workouts = await listWorkouts(auth.user.id);
   return NextResponse.json({ workouts });
 }
 
@@ -59,10 +60,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const workout = await createWorkout(auth.user.id, {
+  const workout = await createWorkout(user.id, {
     ...parsed.data,
     date: parsed.data.date ?? todayDateString(),
-    source: auth.via,
+    source,
   });
   return NextResponse.json({ workout }, { status: 201 });
 }

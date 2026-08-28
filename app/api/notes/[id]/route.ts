@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { archiveNote, getNote, updateNote } from "@/lib/notes/service";
 
-export async function GET(_request: Request, ctx: RouteContext<"/api/notes/[id]">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request, ctx: RouteContext<"/api/notes/[id]">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const note = await getNote(user.id, id);
+  const note = await getNote(auth.user.id, id);
   if (!note) return NextResponse.json({ error: "Note not found" }, { status: 404 });
   return NextResponse.json({ note });
 }
@@ -20,8 +20,8 @@ const updateNoteSchema = z.object({
 });
 
 export async function PATCH(request: Request, ctx: RouteContext<"/api/notes/[id]">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -30,16 +30,16 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/notes/[id]
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const note = await updateNote(user.id, id, parsed.data);
+  const note = await updateNote(auth.user.id, id, parsed.data);
   if (!note) return NextResponse.json({ error: "Note not found" }, { status: 404 });
   return NextResponse.json({ note });
 }
 
-export async function DELETE(_request: Request, ctx: RouteContext<"/api/notes/[id]">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function DELETE(request: Request, ctx: RouteContext<"/api/notes/[id]">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  await archiveNote(user.id, id);
+  await archiveNote(auth.user.id, id);
   return new NextResponse(null, { status: 204 });
 }

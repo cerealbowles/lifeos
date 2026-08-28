@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { requireUserOrWebhookToken } from "@/lib/auth/webhook";
 import { createLogEntry, listLogEntries } from "@/lib/moments/service";
 import { ImmichNotConnectedError } from "@/lib/immich/service";
 import { ImmichError } from "@/lib/immich/client";
 import type { MomentDTO } from "@/lib/moments/types";
+import type { User } from "@/lib/db/schema";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const entries = await listLogEntries(user.id);
+  const entries = await listLogEntries(auth.user.id);
   const moments: MomentDTO[] = entries.map((e) => ({
     id: e.id,
     caption: e.caption,
@@ -22,15 +23,17 @@ export async function GET() {
 }
 
 /**
- * DECISIONS.md ADR-096 — the Moments equivalent of POST /api/workouts (ADR-095): accepts
- * either a browser session (the in-app manual-fallback form) or a bearer token
- * (`MOMENTS_WEBHOOK_TOKEN`), so an eventual iOS Shortcut — "share photo → LifeOS" — can post
- * directly without a real Share Extension. multipart/form-data because this carries an actual
- * file, not JSON like every other write endpoint in this app.
+ * DECISIONS.md ADR-096 — the Moments equivalent of POST /api/workouts (ADR-095). Accepts,
+ * in order: a browser session, the LifeOS Android app's own per-device bearer token
+ * (`requireUserOrApiToken` — added alongside the app's native Moments screen), or the static
+ * `MOMENTS_WEBHOOK_TOKEN` for an external automation with no LifeOS login at all (an eventual
+ * iOS Shortcut). multipart/form-data because this carries an actual file, not JSON like every
+ * other write endpoint in this app.
  */
 export async function POST(request: Request) {
-  const auth = await requireUserOrWebhookToken(request, "MOMENTS_WEBHOOK_TOKEN");
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const apiAuth = await requireUserOrApiToken(request);
+  const user: User | null = apiAuth?.user ?? (await requireUserOrWebhookToken(request, "MOMENTS_WEBHOOK_TOKEN"))?.user ?? null;
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const form = await request.formData().catch(() => null);
   if (!form) return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
   const occurredAt = typeof occurredAtRaw === "string" && occurredAtRaw ? new Date(occurredAtRaw) : undefined;
 
   try {
-    const entry = await createLogEntry(auth.user.id, {
+    const entry = await createLogEntry(user.id, {
       file,
       filename: file instanceof File ? file.name : "moment.jpg",
       caption: caption || undefined,

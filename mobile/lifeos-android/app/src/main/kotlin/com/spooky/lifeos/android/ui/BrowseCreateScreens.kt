@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,6 +16,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -29,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.spooky.lifeos.android.sync.ApiResult
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
@@ -271,6 +277,207 @@ fun NewRoutineScreen(onBack: () -> Unit, onCreated: () -> Unit) {
                 }
                 client.createRoutine(name.trim(), description.trim().ifBlank { null }, category.trim().ifBlank { null }, recurrenceType, config).toUnitResult()
             },
+            onSuccess = { onCreated(); onBack() },
+        )
+    }
+}
+
+@Composable
+fun NewNoteScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    var title by remember { mutableStateOf("") }
+    var body by remember { mutableStateOf("") }
+
+    CreateScaffold("New Note", onBack) {
+        FormField("Title (optional)", title, { title = it })
+        FormField("Note", body, { body = it }, singleLine = false)
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Add Note",
+            color = LifeosColors.accent,
+            onClick = { client.createNote(title.trim().ifBlank { null }, body.trim().ifBlank { null }).toUnitResult() },
+            onSuccess = { onCreated(); onBack() },
+        )
+    }
+}
+
+@Composable
+fun NewListScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    var name by remember { mutableStateOf("") }
+    var listType by remember { mutableStateOf("general") }
+
+    CreateScaffold("New List", onBack) {
+        FormField("Name", name, { name = it })
+        Text("Type", color = LifeosColors.mutedFg, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 6.dp))
+        ChipRow(listOf("general" to "General", "grocery" to "Grocery", "packing" to "Packing", "shopping" to "Shopping"), listType) { listType = it }
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Add List",
+            color = LifeosColors.accent,
+            onClick = { client.createList(name.trim(), listType).toUnitResult() },
+            onSuccess = { onCreated(); onBack() },
+        )
+    }
+}
+
+@Composable
+fun NewMomentScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val scope = rememberCoroutineScope()
+
+    var pickedUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var caption by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> pickedUri = uri }
+
+    CreateScaffold("New Moment", onBack) {
+        com.spooky.lifeos.android.ui.components.LifeCard(
+            onClick = { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        ) {
+            if (pickedUri == null) {
+                Text("Tap to choose a photo", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium)
+            } else {
+                coil3.compose.AsyncImage(
+                    model = pickedUri,
+                    contentDescription = "Selected photo",
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                )
+            }
+        }
+        FormField("Caption (optional)", caption, { caption = it })
+        FormField("Location (optional)", location, { location = it })
+        error?.let { Text("Couldn't upload — $it", color = LifeosColors.overdueFg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp)) }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                val uri = pickedUri ?: return@Button
+                if (busy) return@Button
+                busy = true
+                error = null
+                scope.launch {
+                    val result = withContextIo {
+                        val resolver = context.contentResolver
+                        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                        val mime = resolver.getType(uri) ?: "image/jpeg"
+                        if (bytes == null) {
+                            null
+                        } else {
+                            client.createMoment(bytes, "moment.jpg", mime, caption.trim().ifBlank { null }, location.trim().ifBlank { null })
+                        }
+                    }
+                    when (result) {
+                        null -> error = "Couldn't read the selected photo"
+                        is ApiResult.Success -> { onCreated(); onBack() }
+                        is ApiResult.Failure -> error = result.message
+                    }
+                    busy = false
+                }
+            },
+            enabled = pickedUri != null && !busy,
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = LifeosColors.accent, contentColor = LifeosColors.background),
+        ) {
+            if (busy) {
+                androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), color = LifeosColors.background, strokeWidth = 2.dp)
+            } else {
+                Text("Add Moment")
+            }
+        }
+    }
+}
+
+private suspend fun <T> withContextIo(block: suspend () -> T): T =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() }
+
+@Composable
+fun NewChallengeScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    var name by remember { mutableStateOf("") }
+    var startDate by remember { mutableStateOf("") }
+    var durationDays by remember { mutableStateOf("75") }
+    var habitTitles by remember { mutableStateOf("") }
+
+    CreateScaffold("New Challenge", onBack) {
+        FormField("Name", name, { name = it })
+        FormField("Start date (YYYY-MM-DD)", startDate, { startDate = it })
+        FormField("Duration (days)", durationDays, { durationDays = it.filter(Char::isDigit) }, keyboardType = KeyboardType.Number)
+        FormField("Habits — one per line", habitTitles, { habitTitles = it }, singleLine = false)
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Start Challenge",
+            color = LifeosColors.accent,
+            onClick = {
+                val titles = habitTitles.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                if (titles.isEmpty()) {
+                    ApiResult.Failure("Add at least one habit")
+                } else {
+                    client.createChallenge(name.trim(), startDate.trim(), durationDays.toIntOrNull() ?: 75, titles).toUnitResult()
+                }
+            },
+            onSuccess = { onCreated(); onBack() },
+        )
+    }
+}
+
+@Composable
+fun NewAccountScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    var name by remember { mutableStateOf("") }
+    var accountType by remember { mutableStateOf("checking") }
+    var institution by remember { mutableStateOf("") }
+    var lastFour by remember { mutableStateOf("") }
+    var statementCloseDay by remember { mutableStateOf("") }
+
+    CreateScaffold("New Account", onBack) {
+        FormField("Name", name, { name = it })
+        Text("Type", color = LifeosColors.mutedFg, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 6.dp))
+        ChipRow(listOf("checking" to "Checking", "savings" to "Savings", "credit_card" to "Credit Card", "loan" to "Loan", "investment" to "Investment"), accountType) { accountType = it }
+        FormField("Institution (optional)", institution, { institution = it })
+        FormField("Last 4 digits (optional)", lastFour, { lastFour = it.filter(Char::isDigit).take(4) }, keyboardType = KeyboardType.Number)
+        FormField("Statement close day 1-31 (optional)", statementCloseDay, { statementCloseDay = it.filter(Char::isDigit) }, keyboardType = KeyboardType.Number)
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Add Account",
+            color = LifeosColors.accent,
+            onClick = {
+                client.createAccount(
+                    name.trim(),
+                    accountType,
+                    institution.trim().ifBlank { null },
+                    lastFour.trim().ifBlank { null },
+                    statementCloseDay.toIntOrNull()?.coerceIn(1, 31),
+                ).toUnitResult()
+            },
+            onSuccess = { onCreated(); onBack() },
+        )
+    }
+}
+
+@Composable
+fun NewFeedScreen(onBack: () -> Unit, onCreated: () -> Unit) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    var feedUrl by remember { mutableStateOf("") }
+
+    CreateScaffold("Add Feed", onBack) {
+        FormField("Feed URL", feedUrl, { feedUrl = it })
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Add Feed",
+            color = LifeosColors.accent,
+            onClick = { client.createFeedSubscription(feedUrl.trim()).toUnitResult() },
             onSuccess = { onCreated(); onBack() },
         )
     }

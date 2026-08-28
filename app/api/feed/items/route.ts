@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { getFeedCatchUp } from "@/lib/feed/service";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const catchUp = await getFeedCatchUp(user.id, user.feedLastViewedAt);
+  const catchUp = await getFeedCatchUp(auth.user.id, auth.user.feedLastViewedAt);
   return NextResponse.json(catchUp);
 }

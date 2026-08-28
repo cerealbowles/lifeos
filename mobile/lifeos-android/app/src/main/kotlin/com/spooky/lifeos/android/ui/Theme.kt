@@ -61,6 +61,11 @@ private val DOMAIN_COLORS: Map<String, DomainColor> = mapOf(
     "calendar" to DomainColor(Color(0xFF1B1E19), Color(0xFF7C8570)), // dark moss / slate
     "sports" to DomainColor(Color(0xFF2A1D12), Color(0xFFC08558)), // copper
     "grow" to DomainColor(Color(0xFF17200F), Color(0xFF7FA06B)), // fresh sage — plants read green
+    "notes" to DomainColor(Color(0xFF211D17), Color(0xFFC9B896)), // parchment
+    "lists" to DomainColor(Color(0xFF181C1E), Color(0xFF6E8B94)), // slate blue
+    "moments" to DomainColor(Color(0xFF241419), Color(0xFFB06B84)), // plum
+    "challenges" to DomainColor(Color(0xFF241A0E), Color(0xFFC7913F)), // amber
+    "feed" to DomainColor(Color(0xFF19201C), Color(0xFF6FA085)), // teal
 )
 
 fun domainColor(domain: String): DomainColor = DOMAIN_COLORS[domain] ?: DomainColor(LifeosColors.mutedBg, LifeosColors.mutedFg)

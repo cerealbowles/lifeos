@@ -60,6 +60,10 @@ export async function deleteTask(userId: string, taskId: string): Promise<void> 
   await db.delete(schema.tasks).where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)));
 }
 
+export async function deleteRoutine(userId: string, routineId: string): Promise<void> {
+  await db.delete(schema.routines).where(and(eq(schema.routines.id, routineId), eq(schema.routines.userId, userId)));
+}
+
 export async function listRoutines(userId: string) {
   return db
     .select()

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { createChallenge, listChallenges } from "@/lib/challenges/service";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const challenges = await listChallenges(user.id);
+  const challenges = await listChallenges(auth.user.id);
   return NextResponse.json({ challenges });
 }
 
@@ -19,8 +19,8 @@ const createChallengeSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
   const parsed = createChallengeSchema.safeParse(body);
@@ -28,6 +28,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const result = await createChallenge(user.id, parsed.data);
+  const result = await createChallenge(auth.user.id, parsed.data);
   return NextResponse.json(result, { status: 201 });
 }

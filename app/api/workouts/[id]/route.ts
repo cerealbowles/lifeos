@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { deleteWorkout } from "@/lib/workouts/service";
 
-export async function DELETE(_request: Request, ctx: RouteContext<"/api/workouts/[id]">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function DELETE(request: Request, ctx: RouteContext<"/api/workouts/[id]">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  await deleteWorkout(user.id, id);
+  await deleteWorkout(auth.user.id, id);
   return new NextResponse(null, { status: 204 });
 }

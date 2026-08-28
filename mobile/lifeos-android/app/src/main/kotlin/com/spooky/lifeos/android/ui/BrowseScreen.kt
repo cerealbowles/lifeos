@@ -29,13 +29,19 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -87,6 +93,9 @@ fun BrowseScreen() {
     // A separate flag rather than folding into `selectedRow` — creating isn't "viewing a row
     // that doesn't exist yet," it's a distinct mode with its own screen (BrowseCreateScreens.kt).
     var showCreate by remember { mutableStateOf(false) }
+    // Sports' FAB opens this instead of a create form (games are read-only external data) —
+    // see FavoriteTeamsScreen.kt.
+    var showFavoriteTeams by remember { mutableStateOf(false) }
 
     LaunchedEffect(domain, refreshKey) {
         val d = domain ?: return@LaunchedEffect
@@ -108,6 +117,12 @@ fun BrowseScreen() {
         val activeDomain = domain ?: return
         BackHandler { showCreate = false }
         BrowseCreateHost(domain = activeDomain, onBack = { showCreate = false }, onCreated = { refreshKey++ })
+        return
+    }
+
+    if (showFavoriteTeams) {
+        BackHandler { showFavoriteTeams = false }
+        FavoriteTeamsScreen(onBack = { showFavoriteTeams = false })
         return
     }
 
@@ -133,6 +148,7 @@ fun BrowseScreen() {
                             animatedVisibilityScope = this,
                             onSelectRow = { selectedRow = it },
                             onAddClick = { showCreate = true },
+                            onManageTeams = { showFavoriteTeams = true },
                         )
                     } else {
                         BackHandler { selectedRow = null }
@@ -217,6 +233,12 @@ private fun BrowseCreateHost(domain: BrowseDomain, onBack: () -> Unit, onCreated
         BrowseDomain.ROUTINE -> NewRoutineScreen(onBack, onCreated)
         BrowseDomain.CALENDAR -> NewEventScreen(onBack, onCreated)
         BrowseDomain.SPORTS -> Unit
+        BrowseDomain.NOTES -> NewNoteScreen(onBack, onCreated)
+        BrowseDomain.LISTS -> NewListScreen(onBack, onCreated)
+        BrowseDomain.MOMENTS -> NewMomentScreen(onBack, onCreated)
+        BrowseDomain.CHALLENGES -> NewChallengeScreen(onBack, onCreated)
+        BrowseDomain.ACCOUNTS -> NewAccountScreen(onBack, onCreated)
+        BrowseDomain.FEED -> NewFeedScreen(onBack, onCreated)
     }
 }
 
@@ -232,6 +254,7 @@ private fun BrowseListBody(
     animatedVisibilityScope: AnimatedVisibilityScope,
     onSelectRow: (BrowseRow) -> Unit,
     onAddClick: () -> Unit,
+    onManageTeams: () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -297,7 +320,8 @@ private fun BrowseListBody(
         }
     }
 
-    // No add flow for Sports — read-only external odds/schedule data, nothing to create.
+    // No create flow for Sports — read-only external odds/schedule data, nothing to create.
+    // Its FAB opens the favorite-teams follow/unfollow list instead (FavoriteTeamsScreen.kt).
     if (domain != BrowseDomain.SPORTS) {
         FloatingActionButton(
             onClick = onAddClick,
@@ -306,6 +330,15 @@ private fun BrowseListBody(
             modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
         ) {
             Icon(Icons.Filled.Add, contentDescription = "Add ${domain.label.removeSuffix("s")}")
+        }
+    } else {
+        FloatingActionButton(
+            onClick = onManageTeams,
+            containerColor = LifeosColors.accent,
+            contentColor = LifeosColors.background,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        ) {
+            Icon(Icons.Filled.Star, contentDescription = "Favorite Teams")
         }
     }
     }
@@ -333,6 +366,12 @@ private fun browseDomainIcon(domain: BrowseDomain): ImageVector = when (domain) 
     BrowseDomain.ROUTINE -> Icons.Filled.Repeat
     BrowseDomain.CALENDAR -> Icons.Filled.CalendarMonth
     BrowseDomain.SPORTS -> Icons.Filled.EmojiEvents
+    BrowseDomain.NOTES -> Icons.AutoMirrored.Filled.Notes
+    BrowseDomain.LISTS -> Icons.Filled.Checklist
+    BrowseDomain.MOMENTS -> Icons.Filled.PhotoCamera
+    BrowseDomain.CHALLENGES -> Icons.Filled.EmojiEvents
+    BrowseDomain.ACCOUNTS -> Icons.Filled.AccountBalance
+    BrowseDomain.FEED -> Icons.Filled.RssFeed
 }
 
 private fun emptyStateCopy(domain: BrowseDomain): String = when (domain) {
@@ -342,6 +381,12 @@ private fun emptyStateCopy(domain: BrowseDomain): String = when (domain) {
     BrowseDomain.ROUTINE -> "No routines yet — tap + to add one."
     BrowseDomain.CALENDAR -> "No events yet — tap + to add one."
     BrowseDomain.SPORTS -> "Nothing here yet."
+    BrowseDomain.NOTES -> "No notes yet — tap + to add one."
+    BrowseDomain.LISTS -> "No lists yet — tap + to add one."
+    BrowseDomain.MOMENTS -> "No moments yet — tap + to add one."
+    BrowseDomain.CHALLENGES -> "No challenges yet — tap + to add one."
+    BrowseDomain.ACCOUNTS -> "No accounts yet — tap + to add one."
+    BrowseDomain.FEED -> "No feeds yet — tap + to subscribe to one."
 }
 
 /** `domainColor` (Theme.kt) is keyed by the ranking-engine's `CandidateDomain` string values
@@ -354,6 +399,12 @@ private fun BrowseDomain.toRankingDomain(): String = when (this) {
     BrowseDomain.ROUTINE -> "routine"
     BrowseDomain.CALENDAR -> "calendar"
     BrowseDomain.SPORTS -> "sports"
+    BrowseDomain.NOTES -> "notes"
+    BrowseDomain.LISTS -> "lists"
+    BrowseDomain.MOMENTS -> "moments"
+    BrowseDomain.CHALLENGES -> "challenges"
+    BrowseDomain.ACCOUNTS -> "financial"
+    BrowseDomain.FEED -> "feed"
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -373,5 +424,11 @@ private fun BrowseDetailHost(
         BrowseDomain.ROUTINE -> RoutineDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
         BrowseDomain.CALENDAR -> CalendarDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
         BrowseDomain.SPORTS -> SportsDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.NOTES -> NoteDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.LISTS -> ListDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.MOMENTS -> MomentDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.CHALLENGES -> ChallengeDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.ACCOUNTS -> AccountDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
+        BrowseDomain.FEED -> FeedDetailScreen(row, sharedTransitionScope, animatedVisibilityScope, onBack, onActionComplete)
     }
 }

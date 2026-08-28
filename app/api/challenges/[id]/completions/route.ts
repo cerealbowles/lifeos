@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { toggleCompletion } from "@/lib/challenges/service";
 
 const toggleSchema = z.object({
@@ -9,8 +9,8 @@ const toggleSchema = z.object({
 });
 
 export async function POST(request: Request, ctx: RouteContext<"/api/challenges/[id]/completions">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -19,6 +19,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/challenges/
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const result = await toggleCompletion(user.id, id, parsed.data.habitId, parsed.data.date);
+  const result = await toggleCompletion(auth.user.id, id, parsed.data.habitId, parsed.data.date);
   return NextResponse.json(result);
 }

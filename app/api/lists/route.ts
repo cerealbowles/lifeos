@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { createList, listLists } from "@/lib/lists/service";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const lists = await listLists(user.id);
+  const lists = await listLists(auth.user.id);
   return NextResponse.json({ lists });
 }
 
@@ -17,8 +17,8 @@ const createListSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
   const parsed = createListSchema.safeParse(body);
@@ -26,6 +26,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const list = await createList(user.id, parsed.data.name, parsed.data.listType);
+  const list = await createList(auth.user.id, parsed.data.name, parsed.data.listType);
   return NextResponse.json({ list }, { status: 201 });
 }

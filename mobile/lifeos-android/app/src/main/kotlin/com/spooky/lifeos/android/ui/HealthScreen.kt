@@ -11,41 +11,59 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.spooky.lifeos.android.LifeosConfig
+import com.spooky.lifeos.android.sync.ActivitySessionRow
 import com.spooky.lifeos.android.sync.ApiResult
+import com.spooky.lifeos.android.sync.HealthLogClient
+import com.spooky.lifeos.android.sync.MeasurementRow
 import com.spooky.lifeos.android.sync.MeasurementsClient
 import com.spooky.lifeos.android.sync.SleepClient
 import com.spooky.lifeos.android.sync.WhoopClient
+import com.spooky.lifeos.android.sync.WorkoutRow
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -76,6 +94,19 @@ fun HealthScreen() {
     var skinTempError by remember { mutableStateOf<String?>(null) }
     var selectedSleepSession by remember { mutableStateOf<SleepSession?>(null) }
     var showLogWorkout by remember { mutableStateOf(false) }
+
+    // Manual logging (weight/workouts/activities) — direct user request, 2026-08-28: previously
+    // web-only (components/health/weight-log.tsx, workout-log.tsx, activity-log-row.tsx).
+    // Separate refresh key from the Whoop-telemetry LaunchedEffect below so an add/delete here
+    // doesn't re-fetch trend charts/sleep it has no effect on.
+    var logRefresh by remember { mutableStateOf(0) }
+    var weightLog by remember { mutableStateOf<List<MeasurementRow>?>(null) }
+    var weightLogError by remember { mutableStateOf<String?>(null) }
+    var workoutLog by remember { mutableStateOf<List<WorkoutRow>?>(null) }
+    var workoutLogError by remember { mutableStateOf<String?>(null) }
+    var activeActivitySession by remember { mutableStateOf<ActivitySessionRow?>(null) }
+    var activitySessions by remember { mutableStateOf<List<ActivitySessionRow>?>(null) }
+    var activityLogError by remember { mutableStateOf<String?>(null) }
 
     // Every branch below sets its own error state on failure rather than silently falling
     // back to an empty list — found live: a stale requireUserOrNull() on /api/measurements
@@ -121,6 +152,14 @@ fun HealthScreen() {
                     hrvTrendError = hrvTrendError,
                     skinTempBaseline = skinTempBaseline,
                     skinTempError = skinTempError,
+                    weightLog = weightLog,
+                    weightLogError = weightLogError,
+                    workoutLog = workoutLog,
+                    workoutLogError = workoutLogError,
+                    activeActivitySession = activeActivitySession,
+                    activitySessions = activitySessions,
+                    activityLogError = activityLogError,
+                    onLogChanged = { logRefresh++ },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this,
                     onSelectSleepSession = { selectedSleepSession = it },
@@ -149,6 +188,14 @@ private fun HealthScreenBody(
     hrvTrendError: String?,
     skinTempBaseline: SkinTempBaseline?,
     skinTempError: String?,
+    weightLog: List<MeasurementRow>?,
+    weightLogError: String?,
+    workoutLog: List<WorkoutRow>?,
+    workoutLogError: String?,
+    activeActivitySession: ActivitySessionRow?,
+    activitySessions: List<ActivitySessionRow>?,
+    activityLogError: String?,
+    onLogChanged: () -> Unit,
     sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
     animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope,
     onSelectSleepSession: (SleepSession) -> Unit,
@@ -346,5 +393,212 @@ private fun relativeTime(iso: String): String {
         minutes < 60 -> "${minutes}m ago"
         minutes < 60 * 24 -> "${minutes / 60}h ago"
         else -> "${minutes / (60 * 24)}d ago"
+    }
+}
+
+@Composable
+private fun healthLogClient(): HealthLogClient {
+    val context = LocalContext.current
+    val config = remember { LifeosConfig(context) }
+    return remember { HealthLogClient(config.getBaseUrl() ?: "", config.getToken() ?: "") }
+}
+
+@Composable
+private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = LifeosColors.accent,
+    unfocusedBorderColor = LifeosColors.glassBorder,
+    focusedTextColor = LifeosColors.foreground,
+    unfocusedTextColor = LifeosColors.foreground,
+    focusedContainerColor = LifeosColors.glassSurface,
+    unfocusedContainerColor = LifeosColors.glassSurface,
+)
+
+/** Ports components/health/weight-log.tsx — recent readings + a quick add/delete row. */
+@Composable
+private fun WeightLogSection(log: List<MeasurementRow>?, error: String?, onChanged: () -> Unit) {
+    val client = healthLogClient()
+    val scope = rememberCoroutineScope()
+    var value by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf("lbs") }
+
+    com.spooky.lifeos.android.ui.components.LifeCard {
+        Column {
+            when {
+                error != null && log == null -> ErrorLine("Couldn't load — $error")
+                log.isNullOrEmpty() -> Text("No weight logged yet.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodySmall)
+                else -> log.take(10).forEach { m ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text("${m.value} ${m.unit}", style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground)
+                            Text(m.measuredAt.take(10), style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg)
+                        }
+                        IconButton(onClick = { scope.launch { if (client.deleteMeasurement(m.id) is ApiResult.Success) onChanged() } }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete entry", tint = LifeosColors.overdueFg)
+                        }
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Weight", color = LifeosColors.mutedFg) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    colors = textFieldColors(),
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                ChipRow(listOf("lbs" to "lbs", "kg" to "kg"), unit) { unit = it }
+                IconButton(onClick = {
+                    val v = value.trim()
+                    if (v.isEmpty()) return@IconButton
+                    scope.launch {
+                        val nowIso = java.time.Instant.now().toString()
+                        if (client.addMeasurement("weight", v, unit, nowIso) is ApiResult.Success) {
+                            value = ""
+                            onChanged()
+                        }
+                    }
+                }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add weight", tint = LifeosColors.accent)
+                }
+            }
+        }
+    }
+}
+
+/** Ports components/health/workout-log.tsx — quick-log form (type chips + duration + outdoor)
+ *  plus recent entries with delete. */
+@Composable
+private fun WorkoutLogSection(log: List<WorkoutRow>?, error: String?, onChanged: () -> Unit) {
+    val client = healthLogClient()
+    val scope = rememberCoroutineScope()
+    var type by remember { mutableStateOf("lifting") }
+    var duration by remember { mutableStateOf("30") }
+    var outdoor by remember { mutableStateOf(false) }
+
+    com.spooky.lifeos.android.ui.components.LifeCard {
+        Column {
+            when {
+                error != null && log == null -> ErrorLine("Couldn't load — $error")
+                log.isNullOrEmpty() -> Text("No workouts logged yet.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodySmall)
+                else -> log.take(10).forEach { w ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(
+                                "${w.type.replaceFirstChar { it.uppercase() }} · ${w.durationMinutes}m${if (w.outdoor) " · outdoor" else ""}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = LifeosColors.foreground,
+                            )
+                            Text(w.date, style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg)
+                        }
+                        IconButton(onClick = { scope.launch { if (client.deleteWorkout(w.id) is ApiResult.Success) onChanged() } }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete workout", tint = LifeosColors.overdueFg)
+                        }
+                    }
+                }
+            }
+            Column(modifier = Modifier.padding(top = 10.dp)) {
+                ChipRow(listOf("lifting" to "Lifting", "run" to "Run", "walk" to "Walk", "golf" to "Golf"), type) { type = it }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = duration,
+                        onValueChange = { duration = it.filter(Char::isDigit) },
+                        label = { Text("Minutes", color = LifeosColors.mutedFg) },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                        colors = textFieldColors(),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("Outdoor", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 12.dp))
+                    Switch(
+                        checked = outdoor,
+                        onCheckedChange = { outdoor = it },
+                        colors = SwitchDefaults.colors(checkedTrackColor = LifeosColors.accent),
+                    )
+                    IconButton(onClick = {
+                        val minutes = duration.toIntOrNull() ?: return@IconButton
+                        scope.launch {
+                            if (client.addWorkout(type, minutes, outdoor, null, null) is ApiResult.Success) onChanged()
+                        }
+                    }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add workout", tint = LifeosColors.accent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Ports components/health/activity-log-row.tsx — start/stop a timed session (only "stretching"
+ *  today, per ACTIVITY_TYPES) plus recent completed sessions with delete. */
+@Composable
+private fun ActivityLogSection(active: ActivitySessionRow?, sessions: List<ActivitySessionRow>?, error: String?, onChanged: () -> Unit) {
+    val client = healthLogClient()
+    val scope = rememberCoroutineScope()
+
+    com.spooky.lifeos.android.ui.components.LifeCard {
+        Column {
+            if (active != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${active.activityType.replaceFirstChar { it.uppercase() }} in progress", color = LifeosColors.accent, style = MaterialTheme.typography.bodyMedium)
+                    Button(
+                        onClick = { scope.launch { if (client.completeActivitySession(active.id) is ApiResult.Success) onChanged() } },
+                        colors = ButtonDefaults.buttonColors(containerColor = LifeosColors.accent, contentColor = LifeosColors.background),
+                    ) {
+                        Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text(" Stop")
+                    }
+                }
+            } else {
+                Button(
+                    onClick = { scope.launch { if (client.startActivitySession("stretching") is ApiResult.Success) onChanged() } },
+                    colors = ButtonDefaults.buttonColors(containerColor = LifeosColors.accent, contentColor = LifeosColors.background),
+                    modifier = Modifier.padding(bottom = 10.dp),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Text(" Start Stretching")
+                }
+            }
+
+            when {
+                error != null && sessions == null -> ErrorLine("Couldn't load — $error")
+                sessions.isNullOrEmpty() -> Text("No sessions logged yet.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodySmall)
+                else -> sessions.filter { it.endedAt != null }.take(10).forEach { s ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(s.activityType.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground)
+                            Text(
+                                s.durationSeconds?.let { "${it / 60}m ${it % 60}s" } ?: relativeTime(s.startedAt),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LifeosColors.mutedFg,
+                            )
+                        }
+                        IconButton(onClick = { scope.launch { if (client.deleteActivitySession(s.id) is ApiResult.Success) onChanged() } }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete session", tint = LifeosColors.overdueFg)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

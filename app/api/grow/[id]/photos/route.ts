@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { addPlantPhoto, listPlantPhotos, PlantAlbumNotSetError } from "@/lib/growing/service";
 import { ImmichNotConnectedError } from "@/lib/immich/service";
 import { ImmichError } from "@/lib/immich/client";
 import type { GrowPlantPhotoDTO } from "@/lib/growing/types";
 
-export async function GET(_request: Request, ctx: RouteContext<"/api/grow/[id]/photos">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request, ctx: RouteContext<"/api/grow/[id]/photos">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  const photos = await listPlantPhotos(user.id, id);
+  const photos = await listPlantPhotos(auth.user.id, id);
   const dtos: GrowPlantPhotoDTO[] = photos.map((p) => ({
     id: p.id,
     caption: p.caption,
@@ -27,8 +27,8 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/grow/[id]/p
  * asked for here.
  */
 export async function POST(request: Request, ctx: RouteContext<"/api/grow/[id]/photos">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
   const form = await request.formData().catch(() => null);
@@ -41,7 +41,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/grow/[id]/p
   const caption = typeof form.get("caption") === "string" ? (form.get("caption") as string).trim() : undefined;
 
   try {
-    const photo = await addPlantPhoto(user.id, id, {
+    const photo = await addPlantPhoto(auth.user.id, id, {
       file,
       filename: file instanceof File ? file.name : "plant-photo.jpg",
       caption: caption || undefined,
