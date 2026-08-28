@@ -156,13 +156,24 @@ private fun HealthScreenBody(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-            Text(
-                "Health",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = LifeosColors.foreground,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    "Health",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = LifeosColors.foreground,
+                )
+                // Last time any Whoop metric landed — a proxy for "device last synced" since
+                // there's no separate sync-event record, only the readings it produces.
+                val lastSyncedAt = readings?.values?.mapNotNull { runCatching { Instant.parse(it.measuredAt) }.getOrNull() }?.maxOrNull()
+                if (lastSyncedAt != null) {
+                    Text(
+                        "Whoop last synced ${relativeTime(lastSyncedAt.toString())}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LifeosColors.mutedFg,
+                    )
+                }
+            }
         }
 
         val entries = WHOOP_DISPLAY_ORDER.mapNotNull { type -> readings?.get(type)?.let { type to it } }
