@@ -25,8 +25,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -95,6 +93,7 @@ fun HealthScreen() {
     var skinTempBaseline by remember { mutableStateOf<SkinTempBaseline?>(null) }
     var skinTempError by remember { mutableStateOf<String?>(null) }
     var selectedSleepSession by remember { mutableStateOf<SleepSession?>(null) }
+    var showLogWorkout by remember { mutableStateOf(false) }
 
     // Manual logging (weight/workouts/activities) — direct user request, 2026-08-28: previously
     // web-only (components/health/weight-log.tsx, workout-log.tsx, activity-log-row.tsx).
@@ -137,28 +136,9 @@ fun HealthScreen() {
         }
     }
 
-    LaunchedEffect(logRefresh) {
-        val baseUrl = config.getBaseUrl()
-        val token = config.getToken()
-        if (baseUrl == null || token == null) return@LaunchedEffect
-        val healthLog = HealthLogClient(baseUrl, token)
-
-        when (val result = healthLog.listMeasurements()) {
-            is ApiResult.Success -> { weightLog = result.value; weightLogError = null }
-            is ApiResult.Failure -> weightLogError = result.message
-        }
-        when (val result = healthLog.listWorkouts()) {
-            is ApiResult.Success -> { workoutLog = result.value; workoutLogError = null }
-            is ApiResult.Failure -> workoutLogError = result.message
-        }
-        when (val result = healthLog.listActivitySessions()) {
-            is ApiResult.Success -> {
-                activeActivitySession = result.value.first
-                activitySessions = result.value.second
-                activityLogError = null
-            }
-            is ApiResult.Failure -> activityLogError = result.message
-        }
+    if (showLogWorkout) {
+        LogWorkoutScreen(onBack = { showLogWorkout = false }, onLogged = { showLogWorkout = false })
+        return
     }
 
     SharedTransitionLayout {
@@ -183,6 +163,7 @@ fun HealthScreen() {
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this,
                     onSelectSleepSession = { selectedSleepSession = it },
+                    onLogWorkout = { showLogWorkout = true },
                 )
             } else {
                 BackHandler { selectedSleepSession = null }
@@ -218,16 +199,28 @@ private fun HealthScreenBody(
     sharedTransitionScope: androidx.compose.animation.SharedTransitionScope,
     animatedVisibilityScope: androidx.compose.animation.AnimatedVisibilityScope,
     onSelectSleepSession: (SleepSession) -> Unit,
+    onLogWorkout: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-            Text(
-                "Health",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = LifeosColors.foreground,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    "Health",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = LifeosColors.foreground,
+                )
+                // Last time any Whoop metric landed — a proxy for "device last synced" since
+                // there's no separate sync-event record, only the readings it produces.
+                val lastSyncedAt = readings?.values?.mapNotNull { runCatching { Instant.parse(it.measuredAt) }.getOrNull() }?.maxOrNull()
+                if (lastSyncedAt != null) {
+                    Text(
+                        "Whoop last synced ${relativeTime(lastSyncedAt.toString())}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LifeosColors.mutedFg,
+                    )
+                }
+            }
         }
 
         val entries = WHOOP_DISPLAY_ORDER.mapNotNull { type -> readings?.get(type)?.let { type to it } }
@@ -237,6 +230,11 @@ private fun HealthScreenBody(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
+            // Deliberate narrative order, not the original fetch order: "right now" vitals
+            // first (the NOW layer), then last night's sleep (the thing a morning check of
+            // this screen is usually actually for), then the one truly actionable section
+            // (logging a workout), then the more diagnostic trend/baseline context last,
+            // since those are read-only background, not something to act on.
             item {
                 if (readings == null) {
                     CircularProgressIndicator(color = LifeosColors.accent)
@@ -248,6 +246,34 @@ private fun HealthScreenBody(
                     )
                 } else {
                     WhoopReadingsGrid(entries)
+                }
+            }
+
+            item {
+                SleepLogCard(
+                    sharedTransitionScope = sharedTransitionScope,
+                    animatedVisibilityScope = animatedVisibilityScope,
+                    onSelectSession = onSelectSleepSession,
+                )
+            }
+
+            item { SectionLabel("Workouts") }
+            item {
+                TrendCard {
+                    Column {
+                        Text(
+                            "Log a walk, run, lift, or round of golf.",
+                            color = LifeosColors.mutedFg,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                        Button(
+                            onClick = onLogWorkout,
+                            colors = ButtonDefaults.buttonColors(containerColor = LifeosColors.accent, contentColor = LifeosColors.background),
+                        ) {
+                            Text("Log Workout")
+                        }
+                    }
                 }
             }
 
@@ -275,23 +301,6 @@ private fun HealthScreenBody(
                     else -> CircularProgressIndicator(color = LifeosColors.accent)
                 }
             }
-
-            item {
-                SleepLogCard(
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    onSelectSession = onSelectSleepSession,
-                )
-            }
-
-            item { SectionLabel("Weight") }
-            item { WeightLogSection(weightLog, weightLogError, onLogChanged) }
-
-            item { SectionLabel("Workouts") }
-            item { WorkoutLogSection(workoutLog, workoutLogError, onLogChanged) }
-
-            item { SectionLabel("Activity") }
-            item { ActivityLogSection(activeActivitySession, activitySessions, activityLogError, onLogChanged) }
         }
     }
 }

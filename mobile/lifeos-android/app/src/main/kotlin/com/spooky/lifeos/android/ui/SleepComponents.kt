@@ -16,10 +16,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,15 +38,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spooky.lifeos.android.LifeosConfig
 import com.spooky.lifeos.android.sync.ApiResult
 import com.spooky.lifeos.android.sync.SleepClient
 import com.spooky.lifeos.android.ui.motion.ProgressRing
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.TextStyle as JavaTextStyle
+import java.time.temporal.ChronoUnit
+import java.util.Locale
+import kotlin.math.max
 
 private val STAGE_ORDER = mapOf("up" to 0, "wake" to 1, "still" to 2, "sleep" to 3)
 private val STAGE_LABEL = mapOf("up" to "Up", "wake" to "Wake", "still" to "Still", "sleep" to "Sleep")
@@ -64,6 +76,53 @@ private fun formatDuration(seconds: Int?): String {
     val hours = seconds / 3600
     val minutes = (seconds % 3600) / 60
     return "${hours}h ${minutes}m"
+}
+
+/** "Last night" / "Two nights ago" / weekday / short date — a sleep session reads far more
+ *  naturally against "how long ago" than a raw ISO date slice, same instinct as HealthScreen's
+ *  `relativeTime` for Whoop readings. */
+private fun formatSleepNight(startedAtIso: String): String {
+    val instant = runCatching { Instant.parse(startedAtIso) }.getOrNull() ?: return startedAtIso
+    val date = instant.atZone(ZoneId.systemDefault()).toLocalDate()
+    val daysAgo = ChronoUnit.DAYS.between(date, LocalDate.now())
+    return when (daysAgo) {
+        0L -> "Tonight"
+        1L -> "Last night"
+        2L -> "Two nights ago"
+        in 3..6 -> date.dayOfWeek.getDisplayName(JavaTextStyle.FULL, Locale.getDefault())
+        else -> "${date.monthValue}/${date.dayOfMonth}"
+    }
+}
+
+/**
+ * Compact 7-bar canvas sparkline of recent nightly duration — the same "shape at a glance"
+ * elevation as [TrendLineChart], scaled down for a header strip. The most recent night is
+ * drawn at full accent opacity, older ones muted, so the eye lands on "how did I sleep most
+ * recently" first.
+ */
+@Composable
+private fun SleepDurationSparkline(sessions: List<SleepSession>) {
+    val nights = sessions.take(7).reversed()
+    val hours = nights.map { (it.durationSeconds ?: 0) / 3600f }
+    if (hours.isEmpty()) return
+    val maxHours = max(hours.max(), 1f)
+
+    Canvas(modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        val barCount = hours.size
+        val gap = 6.dp.toPx()
+        val barWidth = (size.width - gap * (barCount - 1)) / barCount
+        hours.forEachIndexed { i, h ->
+            val barHeight = (h / maxHours * size.height).coerceAtLeast(4f)
+            val x = i * (barWidth + gap)
+            val isLast = i == hours.lastIndex
+            drawRoundRect(
+                color = if (isLast) LifeosColors.accent else LifeosColors.accent.copy(alpha = 0.32f),
+                topLeft = Offset(x, size.height - barHeight),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(4.dp.toPx()),
+            )
+        }
+    }
 }
 
 /**
@@ -97,7 +156,17 @@ fun SleepLogCard(
 
     com.spooky.lifeos.android.ui.components.LifeCard {
         Column {
+            val loadedSessions = sessions
+            val avgLabel = loadedSessions
+                ?.mapNotNull { it.durationSeconds }
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { durations -> "Avg " + formatDuration(durations.sum() / durations.size) + " over ${durations.size} nights" }
+
             Text("Sleep Log", style = MaterialTheme.typography.titleSmall, color = LifeosColors.foreground)
+            avgLabel?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg, modifier = Modifier.padding(top = 2.dp))
+            }
+
             when {
                 error != null -> Text(
                     "Couldn't load — $error",
@@ -105,33 +174,51 @@ fun SleepLogCard(
                     color = LifeosColors.overdueFg,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                sessions == null -> CircularProgressIndicator(modifier = Modifier.padding(top = 12.dp), color = LifeosColors.accent)
-                sessions!!.isEmpty() -> Text(
+                loadedSessions == null -> CircularProgressIndicator(modifier = Modifier.padding(top = 12.dp), color = LifeosColors.accent)
+                loadedSessions.isEmpty() -> Text(
                     "Not connected yet — pair the Whoop Bridge companion app to start syncing.",
                     style = MaterialTheme.typography.bodySmall,
                     color = LifeosColors.mutedFg,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                else -> Column(modifier = Modifier.padding(top = 8.dp)) {
-                    sessions!!.forEachIndexed { index, session ->
-                        com.spooky.lifeos.android.ui.motion.StaggeredEntrance(index = index) {
-                            with(sharedTransitionScope) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                        .sharedBounds(
-                                            rememberSharedContentState(key = "sleep-session-${session.id}"),
-                                            animatedVisibilityScope = animatedVisibilityScope,
+                else -> {
+                    SleepDurationSparkline(loadedSessions)
+                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                        loadedSessions.forEachIndexed { index, session ->
+                            com.spooky.lifeos.android.ui.motion.StaggeredEntrance(index = index) {
+                                with(sharedTransitionScope) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .sharedBounds(
+                                                rememberSharedContentState(key = "sleep-session-${session.id}"),
+                                                animatedVisibilityScope = animatedVisibilityScope,
+                                            )
+                                            .clickable { onSelectSession(session) }
+                                            .padding(vertical = 7.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier.size(30.dp).background(LifeosColors.accent.copy(alpha = 0.2f), CircleShape),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(Icons.Filled.Bedtime, contentDescription = null, tint = LifeosColors.accent, modifier = Modifier.size(15.dp))
+                                            }
+                                            Text(
+                                                formatSleepNight(session.startedAt),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = LifeosColors.foreground,
+                                                modifier = Modifier.padding(start = 10.dp),
+                                            )
+                                        }
+                                        Text(
+                                            formatDuration(session.durationSeconds),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = LifeosColors.foreground,
                                         )
-                                        .clickable { onSelectSession(session) }
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text(
-                                        runCatching { Instant.parse(session.startedAt).toString().take(10) }.getOrDefault(session.startedAt),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = LifeosColors.foreground,
-                                    )
-                                    Text(formatDuration(session.durationSeconds), style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg)
+                                    }
                                 }
                             }
                         }
