@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUserOrApiToken } from "@/lib/auth/api-token";
-import { updateRoutine } from "@/lib/tasks/service";
+import { deleteRoutine, updateRoutine } from "@/lib/tasks/service";
 import { RECURRENCE_TYPES } from "@/lib/db/schema";
 import { recurrenceConfigSchema } from "../route";
 
@@ -35,4 +35,13 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/routines/[
   const routine = await updateRoutine(user.id, id, parsed.data, user.timezone);
   if (!routine) return NextResponse.json({ error: "Routine not found" }, { status: 404 });
   return NextResponse.json({ routine });
+}
+
+export async function DELETE(request: Request, ctx: RouteContext<"/api/routines/[id]">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await ctx.params;
+  await deleteRoutine(auth.user.id, id);
+  return new NextResponse(null, { status: 204 });
 }

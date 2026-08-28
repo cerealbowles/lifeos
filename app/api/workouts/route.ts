@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { requireUserOrWebhookToken } from "@/lib/auth/webhook";
 import { createWorkout, listWorkouts } from "@/lib/workouts/service";
+import type { User } from "@/lib/db/schema";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const workouts = await listWorkouts(user.id);
+  const workouts = await listWorkouts(auth.user.id);
   return NextResponse.json({ workouts });
 }
 
@@ -37,15 +38,22 @@ const createWorkoutSchema = z.object({
 });
 
 /**
- * DECISIONS.md ADR-095 — the one route in this app that accepts two different auth
- * mechanisms (session cookie or a bearer token, see lib/auth/webhook.ts), specifically so
- * an external automation can hit this without ever holding a browser session. `date`
- * defaults to today, since an automation firing right as a workout starts/ends has no reason
- * to compute and pass a date itself.
+ * DECISIONS.md ADR-095 — accepts three auth mechanisms: a session cookie, the LifeOS Android
+ * app's own per-device bearer token (added alongside the app's native workout logging), or
+ * the static `WORKOUT_WEBHOOK_TOKEN` for an external automation with no LifeOS login at all.
+ * `date` defaults to today, since an automation firing right as a workout starts/ends has no
+ * reason to compute and pass a date itself.
  */
 export async function POST(request: Request) {
-  const auth = await requireUserOrWebhookToken(request);
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const apiAuth = await requireUserOrApiToken(request);
+  let user: User | null = apiAuth?.user ?? null;
+  let source: string = apiAuth?.via ?? "session";
+  if (!user) {
+    const webhookAuth = await requireUserOrWebhookToken(request);
+    user = webhookAuth?.user ?? null;
+    source = webhookAuth?.via ?? source;
+  }
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
   const parsed = createWorkoutSchema.safeParse(body);
@@ -53,10 +61,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const workout = await createWorkout(auth.user.id, {
+  const workout = await createWorkout(user.id, {
     ...parsed.data,
     date: parsed.data.date ?? todayDateString(),
-    source: auth.via,
+    source,
   });
   return NextResponse.json({ workout }, { status: 201 });
 }

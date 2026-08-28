@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { addFeedSubscription, listFeedSubscriptions, FeedProviderError } from "@/lib/feed/service";
 import { isUniqueViolation } from "@/lib/db/errors";
 
-export async function GET() {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const subscriptions = await listFeedSubscriptions(user.id);
+  const subscriptions = await listFeedSubscriptions(auth.user.id);
   return NextResponse.json({ subscriptions });
 }
 
@@ -17,8 +17,8 @@ const addSubscriptionSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
   const parsed = addSubscriptionSchema.safeParse(body);
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const subscription = await addFeedSubscription(user.id, parsed.data.feedUrl);
+    const subscription = await addFeedSubscription(auth.user.id, parsed.data.feedUrl);
     return NextResponse.json({ subscription }, { status: 201 });
   } catch (err) {
     if (err instanceof FeedProviderError) {

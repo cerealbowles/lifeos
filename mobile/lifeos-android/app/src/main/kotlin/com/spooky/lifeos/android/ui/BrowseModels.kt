@@ -11,6 +11,12 @@ enum class BrowseDomain(val label: String, val path: String, val jsonKey: String
     // (a windowed agenda query param, and a nested favorites-per-sport-group structure).
     CALENDAR("Calendar", "/api/calendar/events", "events"),
     SPORTS("Sports", "/api/sports/games", ""),
+    NOTES("Notes", "/api/notes", "notes"),
+    LISTS("Lists", "/api/lists", "lists"),
+    MOMENTS("Moments", "/api/moments", "moments"),
+    CHALLENGES("Challenges", "/api/challenges", "challenges"),
+    ACCOUNTS("Accounts", "/api/finance/accounts", "accounts"),
+    FEED("Feeds", "/api/feed/subscriptions", "subscriptions"),
 }
 
 /**
@@ -94,6 +100,57 @@ fun parseBrowseRows(domain: BrowseDomain, jsonText: String): List<BrowseRow> {
                     o.optString("nextDueAt").takeIf { o.has("nextDueAt") && !o.isNull("nextDueAt") }?.let { "Next ${it.take(10)}" },
                 ).joinToString(" · "),
                 inactive = !o.optBoolean("active", true),
+                raw = o.toString(),
+            )
+            BrowseDomain.NOTES -> BrowseRow(
+                id = o.getString("id"),
+                title = o.optString("title").takeIf { it.isNotBlank() } ?: "Untitled",
+                subtitle = o.optString("body").takeIf { it.isNotBlank() && !o.isNull("body") }?.replace("\n", " ")?.take(80) ?: "",
+                inactive = false,
+                raw = o.toString(),
+            )
+            BrowseDomain.LISTS -> BrowseRow(
+                id = o.getString("id"),
+                title = o.getString("name"),
+                subtitle = "",
+                inactive = false,
+                raw = o.toString(),
+            )
+            BrowseDomain.MOMENTS -> BrowseRow(
+                id = o.getString("id"),
+                title = o.optString("caption").takeIf { it.isNotBlank() && !o.isNull("caption") } ?: "Moment",
+                subtitle = listOfNotNull(
+                    o.optString("occurredAt").takeIf { o.has("occurredAt") && !o.isNull("occurredAt") }?.replace("T", " ")?.take(16),
+                    o.optString("location").takeIf { it.isNotBlank() && !o.isNull("location") },
+                ).joinToString(" · "),
+                inactive = false,
+                raw = o.toString(),
+            )
+            BrowseDomain.CHALLENGES -> BrowseRow(
+                id = o.getString("id"),
+                title = o.getString("name"),
+                subtitle = listOfNotNull(
+                    o.optString("status").takeIf { it.isNotBlank() && !o.isNull("status") }?.replaceFirstChar { c -> c.uppercase() },
+                ).joinToString(" · "),
+                inactive = o.optString("status") == "abandoned",
+                raw = o.toString(),
+            )
+            BrowseDomain.ACCOUNTS -> BrowseRow(
+                id = o.getString("id"),
+                title = o.getString("name"),
+                subtitle = listOfNotNull(
+                    o.optString("accountType").takeIf { it.isNotBlank() },
+                    o.optString("institution").takeIf { it.isNotBlank() && !o.isNull("institution") },
+                    o.optString("lastFour").takeIf { it.isNotBlank() && !o.isNull("lastFour") }?.let { "····$it" },
+                ).joinToString(" · "),
+                inactive = false,
+                raw = o.toString(),
+            )
+            BrowseDomain.FEED -> BrowseRow(
+                id = o.getString("id"),
+                title = o.optString("title").takeIf { it.isNotBlank() && !o.isNull("title") } ?: o.getString("feedUrl"),
+                subtitle = o.optString("siteUrl").takeIf { it.isNotBlank() && !o.isNull("siteUrl") } ?: o.getString("feedUrl"),
+                inactive = false,
                 raw = o.toString(),
             )
         }

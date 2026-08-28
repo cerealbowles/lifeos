@@ -4,6 +4,9 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,15 +24,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -267,12 +279,20 @@ fun PetDetailScreen(
             notes?.let { DetailField("Notes", it) }
 
             Spacer(modifier = Modifier.height(8.dp))
-            ActionButton(
-                label = if (active) "Retire" else "Restore",
-                color = if (active) LifeosColors.overdueFg else LifeosColors.accent,
-                onClick = { client.updatePetActive(row.id, !active) },
-                onSuccess = { onActionComplete(); onBack() },
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ActionButton(
+                    label = if (active) "Retire" else "Restore",
+                    color = if (active) LifeosColors.dueSoonFg else LifeosColors.accent,
+                    onClick = { client.updatePetActive(row.id, !active) },
+                    onSuccess = { onActionComplete(); onBack() },
+                )
+                ActionButton(
+                    label = "Delete",
+                    color = LifeosColors.overdueFg,
+                    onClick = { client.deletePet(row.id) },
+                    onSuccess = { onActionComplete(); onBack() },
+                )
+            }
         }
     }
 }
@@ -305,6 +325,30 @@ fun PlantDetailScreen(
     var trichomeField by remember(row.raw) { mutableStateOf(trichomeRaw ?: "clear") }
     var notesField by remember(row.raw) { mutableStateOf(notes ?: "") }
 
+    val scope = rememberCoroutineScope()
+    val config = remember { LifeosConfig(context) }
+    val imageLoader = remember { com.spooky.lifeos.android.sync.authedImageLoader(context) }
+    var photos by remember { mutableStateOf<List<com.spooky.lifeos.android.sync.PlantPhotoRow>?>(null) }
+    var photosRefresh by remember { mutableStateOf(0) }
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val resolver = context.contentResolver
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readBytes() } }
+            val mime = resolver.getType(uri) ?: "image/jpeg"
+            if (bytes != null && client.addPlantPhoto(row.id, bytes, "plant-photo.jpg", mime, null) is ApiResult.Success) photosRefresh++
+        }
+    }
+
+    LaunchedEffect(photosRefresh) {
+        when (val result = client.listPlantPhotos(row.id)) {
+            is ApiResult.Success -> photos = result.value
+            is ApiResult.Failure -> Unit
+        }
+    }
+
     BrowseDetailScaffold(
         sharedKey = browseSharedKey(BrowseDomain.GROW, row.id),
         sharedTransitionScope = sharedTransitionScope,
@@ -335,13 +379,53 @@ fun PlantDetailScreen(
             DetailField("Last checked", lastChecked ?: "Never checked")
             notes?.let { DetailField("Notes", it) }
 
+            Text("Photos", style = MaterialTheme.typography.labelSmall, color = LifeosColors.mutedFg, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+                photos?.let { list ->
+                    items(list, key = { it.id }) { photo ->
+                        Box {
+                            coil3.compose.AsyncImage(
+                                model = "${config.getBaseUrl().orEmpty()}${photo.imageUrl}",
+                                imageLoader = imageLoader,
+                                contentDescription = photo.caption ?: "Plant photo",
+                                modifier = Modifier.size(96.dp).clip(RoundedCornerShape(10.dp)),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            )
+                            IconButton(
+                                onClick = { scope.launch { if (client.deletePlantPhoto(row.id, photo.id) is ApiResult.Success) photosRefresh++ } },
+                                modifier = Modifier.size(28.dp).align(Alignment.TopEnd),
+                            ) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Delete photo", tint = LifeosColors.overdueFg, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+                item {
+                    Box(
+                        modifier = Modifier.size(96.dp).clip(RoundedCornerShape(10.dp)).background(LifeosColors.glassSurface)
+                            .clickable { pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add photo", tint = LifeosColors.accent)
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
-            ActionButton(
-                label = if (active) "Mark Harvested" else "Restore",
-                color = if (active) LifeosColors.dueSoonFg else LifeosColors.accent,
-                onClick = { client.updatePlantActive(row.id, !active) },
-                onSuccess = { onActionComplete(); onBack() },
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ActionButton(
+                    label = if (active) "Mark Harvested" else "Restore",
+                    color = if (active) LifeosColors.dueSoonFg else LifeosColors.accent,
+                    onClick = { client.updatePlantActive(row.id, !active) },
+                    onSuccess = { onActionComplete(); onBack() },
+                )
+                ActionButton(
+                    label = "Delete",
+                    color = LifeosColors.overdueFg,
+                    onClick = { client.deletePlant(row.id) },
+                    onSuccess = { onActionComplete(); onBack() },
+                )
+            }
         }
     }
 }
@@ -519,6 +603,494 @@ fun RoutineDetailScreen(
                 onSuccess = { onActionComplete(); onBack() },
             )
         }
+        Spacer(modifier = Modifier.height(12.dp))
+        ActionButton(
+            label = "Delete",
+            color = LifeosColors.overdueFg,
+            onClick = { client.deleteRoutine(row.id) },
+            onSuccess = { onActionComplete(); onBack() },
+        )
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun NoteDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val o = remember(row.raw) { JSONObject(row.raw) }
+
+    val titleRaw = o.optString("title").takeIf { it.isNotBlank() }
+    val body = o.optString("body").takeIf { it.isNotBlank() && !o.isNull("body") }
+    val pinned = o.optBoolean("pinned", false)
+
+    var editing by remember { mutableStateOf(false) }
+    var titleField by remember(row.raw) { mutableStateOf(titleRaw ?: "") }
+    var bodyField by remember(row.raw) { mutableStateOf(body ?: "") }
+
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.NOTES, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = titleRaw ?: "Untitled",
+        badge = if (pinned) "Pinned" else null,
+        badgeColor = LifeosColors.accent,
+        onEdit = { editing = true }.takeIf { !editing },
+    ) {
+        if (editing) {
+            FormField("Title (optional)", titleField, { titleField = it })
+            FormField("Note", bodyField, { bodyField = it }, singleLine = false)
+            Spacer(modifier = Modifier.height(8.dp))
+            ActionButton(
+                label = "Save",
+                color = LifeosColors.accent,
+                onClick = { client.updateNote(row.id, titleField.trim(), bodyField.trim(), null) },
+                onSuccess = { onActionComplete(); onBack() },
+            )
+            return@BrowseDetailScaffold
+        }
+        body?.let { DetailField("Note", it) }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ActionButton(
+                label = if (pinned) "Unpin" else "Pin",
+                color = LifeosColors.accent,
+                onClick = { client.updateNote(row.id, null, null, !pinned) },
+                onSuccess = { onActionComplete(); onBack() },
+            )
+            ActionButton(
+                label = "Delete",
+                color = LifeosColors.overdueFg,
+                onClick = { client.deleteNote(row.id) },
+                onSuccess = { onActionComplete(); onBack() },
+            )
+        }
+    }
+}
+
+/**
+ * Unlike every other domain, a list's items aren't in `row.raw` (GET /api/lists returns bare
+ * list rows, no items array — see lib/lists/service.ts's listLists vs getListWithItems), so
+ * this screen fetches them itself on load rather than parsing purely from the row it was
+ * handed. `itemsRefresh` re-fetches after any item add/check/remove; `onActionComplete` (the
+ * list-level refresh) only fires on rename/delete, matching every other domain's convention
+ * of "only bump the outer list when something outside this screen changed."
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun ListDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val o = remember(row.raw) { JSONObject(row.raw) }
+    val scope = rememberCoroutineScope()
+
+    val listType = o.optString("listType").takeIf { it.isNotBlank() && !o.isNull("listType") }
+
+    var editing by remember { mutableStateOf(false) }
+    var nameField by remember(row.raw) { mutableStateOf(row.title) }
+    var items by remember { mutableStateOf<List<com.spooky.lifeos.android.sync.ListItemRow>?>(null) }
+    var itemsError by remember { mutableStateOf<String?>(null) }
+    var itemsRefresh by remember { mutableStateOf(0) }
+    var newItemName by remember { mutableStateOf("") }
+
+    LaunchedEffect(itemsRefresh) {
+        when (val result = client.listListItems(row.id)) {
+            is ApiResult.Success -> {
+                items = result.value
+                itemsError = null
+            }
+            is ApiResult.Failure -> itemsError = result.message
+        }
+    }
+
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.LISTS, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = row.title,
+        badge = listType?.replaceFirstChar { it.uppercase() },
+        onEdit = { editing = true }.takeIf { !editing },
+    ) {
+        if (editing) {
+            FormField("Name", nameField, { nameField = it })
+            Spacer(modifier = Modifier.height(8.dp))
+            ActionButton(
+                label = "Save",
+                color = LifeosColors.accent,
+                onClick = { client.renameList(row.id, nameField.trim()) },
+                onSuccess = { onActionComplete(); onBack() },
+            )
+            return@BrowseDetailScaffold
+        }
+
+        when {
+            itemsError != null && items == null -> Text("Couldn't load items — $itemsError", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium)
+            items.isNullOrEmpty() -> Text("No items yet.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 12.dp))
+            else -> Column {
+                items.orEmpty().forEach { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            androidx.compose.material3.Checkbox(
+                                checked = item.checked,
+                                onCheckedChange = {
+                                    scope.launch {
+                                        if (client.setListItemChecked(row.id, item.id, it) is ApiResult.Success) itemsRefresh++
+                                    }
+                                },
+                                colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = LifeosColors.accent),
+                            )
+                            Column {
+                                Text(
+                                    item.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (item.checked) LifeosColors.mutedFg else LifeosColors.foreground,
+                                )
+                                val qty = listOfNotNull(item.quantity, item.unit).joinToString(" ").ifBlank { null }
+                                qty?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg) }
+                            }
+                        }
+                        IconButton(onClick = {
+                            scope.launch {
+                                if (client.removeListItem(row.id, item.id) is ApiResult.Success) itemsRefresh++
+                            }
+                        }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Remove ${item.name}", tint = LifeosColors.overdueFg)
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+            androidx.compose.material3.OutlinedTextField(
+                value = newItemName,
+                onValueChange = { newItemName = it },
+                label = { Text("Add item", color = LifeosColors.mutedFg) },
+                singleLine = true,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = LifeosColors.accent,
+                    unfocusedBorderColor = LifeosColors.glassBorder,
+                    focusedTextColor = LifeosColors.foreground,
+                    unfocusedTextColor = LifeosColors.foreground,
+                    focusedContainerColor = LifeosColors.glassSurface,
+                    unfocusedContainerColor = LifeosColors.glassSurface,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = {
+                val name = newItemName.trim()
+                if (name.isEmpty()) return@IconButton
+                scope.launch {
+                    if (client.addListItem(row.id, name, null, null, null) is ApiResult.Success) {
+                        newItemName = ""
+                        itemsRefresh++
+                    }
+                }
+            }) {
+                Icon(Icons.Filled.Add, contentDescription = "Add item", tint = LifeosColors.accent)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        ActionButton(
+            label = "Delete List",
+            color = LifeosColors.overdueFg,
+            onClick = { client.deleteList(row.id) },
+            onSuccess = { onActionComplete(); onBack() },
+        )
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun MomentDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val config = remember { LifeosConfig(context) }
+    val imageLoader = remember { com.spooky.lifeos.android.sync.authedImageLoader(context) }
+    val o = remember(row.raw) { JSONObject(row.raw) }
+
+    val caption = o.optString("caption").takeIf { it.isNotBlank() && !o.isNull("caption") }
+    val location = o.optString("location").takeIf { it.isNotBlank() && !o.isNull("location") }
+    val occurredAt = dateTime(o.optString("occurredAt").takeIf { o.has("occurredAt") && !o.isNull("occurredAt") })
+    val imageUrl = o.optString("imageUrl").takeIf { it.isNotBlank() }?.let { "${config.getBaseUrl().orEmpty()}$it" }
+
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.MOMENTS, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = caption ?: "Moment",
+    ) {
+        imageUrl?.let {
+            coil3.compose.AsyncImage(
+                model = it,
+                imageLoader = imageLoader,
+                contentDescription = caption ?: "Moment photo",
+                modifier = Modifier.fillMaxSize().height(280.dp).padding(bottom = 14.dp),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        }
+        occurredAt?.let { DetailField("When", it) }
+        location?.let { DetailField("Location", it) }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Delete",
+            color = LifeosColors.overdueFg,
+            onClick = { client.deleteMoment(row.id) },
+            onSuccess = { onActionComplete(); onBack() },
+        )
+    }
+}
+
+/**
+ * Like ListDetailScreen, fetches its own detail (getChallengeDetail) rather than reading
+ * purely from `row.raw` — the list endpoint's bare rows have no habits. Scoped to *today's*
+ * checklist only (see BrowseClient.getChallengeDetail's doc comment) — full history is a web-
+ * only view for now.
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun ChallengeDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val scope = rememberCoroutineScope()
+
+    var detail by remember { mutableStateOf<com.spooky.lifeos.android.sync.ChallengeDetail?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableStateOf(0) }
+    var newHabit by remember { mutableStateOf("") }
+
+    LaunchedEffect(refresh) {
+        when (val result = client.getChallengeDetail(row.id)) {
+            is ApiResult.Success -> {
+                detail = result.value
+                loadError = null
+            }
+            is ApiResult.Failure -> loadError = result.message
+        }
+    }
+
+    val d = detail
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.CHALLENGES, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = row.title,
+        badge = d?.status?.replaceFirstChar { it.uppercase() },
+        badgeColor = if (d?.status == "active") LifeosColors.accent else LifeosColors.mutedFg,
+    ) {
+        when {
+            d == null && loadError != null -> Text("Couldn't load challenge — $loadError", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium)
+            d == null -> CircularProgressIndicator(color = LifeosColors.accent)
+            else -> {
+                DetailField("Progress", "Day ${d.day} of ${d.durationDays}")
+                Text("Today's habits", style = MaterialTheme.typography.labelSmall, color = LifeosColors.mutedFg, modifier = Modifier.padding(bottom = 6.dp, top = 8.dp))
+                d.habits.forEach { habit ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Checkbox(
+                                checked = habit.doneToday,
+                                enabled = !habit.autoCheck,
+                                onCheckedChange = {
+                                    scope.launch {
+                                        if (client.toggleHabitToday(row.id, habit.id, d.todayDate) is ApiResult.Success) refresh++
+                                    }
+                                },
+                                colors = CheckboxDefaults.colors(checkedColor = LifeosColors.accent),
+                            )
+                            Column {
+                                Text(habit.title, style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground)
+                                if (habit.autoCheck) {
+                                    Text("Auto-tracked from workouts", style = MaterialTheme.typography.bodySmall, color = LifeosColors.mutedFg)
+                                }
+                            }
+                        }
+                        IconButton(onClick = {
+                            scope.launch {
+                                if (client.removeChallengeHabit(row.id, habit.id) is ApiResult.Success) refresh++
+                            }
+                        }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Remove ${habit.title}", tint = LifeosColors.overdueFg)
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    OutlinedTextField(
+                        value = newHabit,
+                        onValueChange = { newHabit = it },
+                        label = { Text("Add habit", color = LifeosColors.mutedFg) },
+                        singleLine = true,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = LifeosColors.accent,
+                            unfocusedBorderColor = LifeosColors.glassBorder,
+                            focusedTextColor = LifeosColors.foreground,
+                            unfocusedTextColor = LifeosColors.foreground,
+                            focusedContainerColor = LifeosColors.glassSurface,
+                            unfocusedContainerColor = LifeosColors.glassSurface,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = {
+                        val title = newHabit.trim()
+                        if (title.isEmpty()) return@IconButton
+                        scope.launch {
+                            if (client.addChallengeHabit(row.id, title) is ApiResult.Success) {
+                                newHabit = ""
+                                refresh++
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add habit", tint = LifeosColors.accent)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (d.status == "active") {
+                        ActionButton(
+                            label = "Mark Completed",
+                            color = LifeosColors.accent,
+                            onClick = { client.updateChallengeStatus(row.id, "completed") },
+                            onSuccess = { onActionComplete(); onBack() },
+                        )
+                        ActionButton(
+                            label = "Abandon",
+                            color = LifeosColors.mutedFg,
+                            onClick = { client.updateChallengeStatus(row.id, "abandoned") },
+                            onSuccess = { onActionComplete(); onBack() },
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                ActionButton(
+                    label = "Delete",
+                    color = LifeosColors.overdueFg,
+                    onClick = { client.deleteChallenge(row.id) },
+                    onSuccess = { onActionComplete(); onBack() },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun AccountDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val o = remember(row.raw) { JSONObject(row.raw) }
+
+    val accountType = o.optString("accountType").takeIf { it.isNotBlank() }
+    val institution = o.optString("institution").takeIf { it.isNotBlank() && !o.isNull("institution") }
+    val lastFour = o.optString("lastFour").takeIf { it.isNotBlank() && !o.isNull("lastFour") }
+    val closeDay = o.optInt("statementCloseDay", -1).takeIf { it > 0 }
+    val nextClose = dateOnly(o.optString("nextStatementCloseAt").takeIf { o.has("nextStatementCloseAt") && !o.isNull("nextStatementCloseAt") })
+
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.ACCOUNTS, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = row.title,
+    ) {
+        accountType?.let { DetailField("Type", it.replaceFirstChar { c -> c.uppercase() }.replace("_", " ")) }
+        institution?.let { DetailField("Institution", it) }
+        lastFour?.let { DetailField("Last 4 digits", it) }
+        closeDay?.let { DetailField("Statement closes", "Day $it") }
+        nextClose?.let { DetailField("Next statement close", it) }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Delete",
+            color = LifeosColors.overdueFg,
+            onClick = { client.deleteAccount(row.id) },
+            onSuccess = { onActionComplete(); onBack() },
+        )
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun FeedDetailScreen(
+    row: BrowseRow,
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onBack: () -> Unit,
+    onActionComplete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val client = remember { browseClientFor(context) }
+    val o = remember(row.raw) { JSONObject(row.raw) }
+
+    val feedUrl = o.getString("feedUrl")
+    val siteUrl = o.optString("siteUrl").takeIf { it.isNotBlank() && !o.isNull("siteUrl") }
+    val lastSyncedAt = dateTime(o.optString("lastSyncedAt").takeIf { o.has("lastSyncedAt") && !o.isNull("lastSyncedAt") })
+
+    BrowseDetailScaffold(
+        sharedKey = browseSharedKey(BrowseDomain.FEED, row.id),
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope,
+        onBack = onBack,
+        title = row.title,
+    ) {
+        DetailField("Feed URL", feedUrl)
+        siteUrl?.let { DetailField("Site", it) }
+        DetailField("Last synced", lastSyncedAt ?: "Not yet synced")
+
+        Spacer(modifier = Modifier.height(8.dp))
+        ActionButton(
+            label = "Unsubscribe",
+            color = LifeosColors.overdueFg,
+            onClick = { client.deleteFeedSubscription(row.id) },
+            onSuccess = { onActionComplete(); onBack() },
+        )
     }
 }
 

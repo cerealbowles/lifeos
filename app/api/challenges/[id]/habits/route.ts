@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { addHabit } from "@/lib/challenges/service";
 
 const addHabitSchema = z.object({
@@ -8,8 +8,8 @@ const addHabitSchema = z.object({
 });
 
 export async function POST(request: Request, ctx: RouteContext<"/api/challenges/[id]/habits">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
   const body = await request.json().catch(() => null);
@@ -18,6 +18,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/challenges/
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const habit = await addHabit(user.id, id, parsed.data.title);
+  const habit = await addHabit(auth.user.id, id, parsed.data.title);
   return NextResponse.json({ habit }, { status: 201 });
 }

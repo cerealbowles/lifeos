@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireUserOrNull } from "@/lib/auth/guards";
+import { requireUserOrApiToken } from "@/lib/auth/api-token";
 import { deleteLogEntry } from "@/lib/moments/service";
 
-export async function DELETE(_request: Request, ctx: RouteContext<"/api/moments/[id]">) {
-  const user = await requireUserOrNull();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function DELETE(request: Request, ctx: RouteContext<"/api/moments/[id]">) {
+  const auth = await requireUserOrApiToken(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  await deleteLogEntry(user.id, id);
+  await deleteLogEntry(auth.user.id, id);
   return new NextResponse(null, { status: 204 });
 }

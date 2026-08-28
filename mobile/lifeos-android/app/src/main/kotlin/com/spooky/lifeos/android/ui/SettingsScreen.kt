@@ -49,6 +49,13 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SettingsScreen(onLogout: () -> Unit) {
+    var showNotifications by remember { mutableStateOf(false) }
+    if (showNotifications) {
+        androidx.activity.compose.BackHandler { showNotifications = false }
+        NotificationsScreen(onBack = { showNotifications = false })
+        return
+    }
+
     val context = LocalContext.current
     val config = remember { LifeosConfig(context) }
     val scope = rememberCoroutineScope()
@@ -96,6 +103,13 @@ fun SettingsScreen(onLogout: () -> Unit) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             com.spooky.lifeos.android.ui.components.SectionHeader("SERVER")
             Text(config.getBaseUrl() ?: "—", style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground, modifier = Modifier.padding(top = 2.dp))
+        }
+
+        com.spooky.lifeos.android.ui.components.LifeCard(
+            onClick = { showNotifications = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            Text("Notifications", style = MaterialTheme.typography.bodyMedium, color = LifeosColors.foreground)
         }
 
         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {

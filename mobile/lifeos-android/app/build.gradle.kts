@@ -76,6 +76,16 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
+    // Image loading for Moments/Grow photos (proxied through /api/.../image, which needs the
+    // same bearer token every other call uses — see sync/AuthedImageLoader.kt) — coil-network-okhttp
+    // so it shares this app's own OkHttpClient/interceptor rather than pulling in a second HTTP stack.
+    implementation("io.coil-kt.coil3:coil-compose:3.6.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.0")
+
+    // Native photo picker for Moments/Grow photo capture — no runtime permission needed on
+    // API 33+, and gracefully falls back to the system photo picker on older API levels too.
+    implementation("androidx.activity:activity-ktx:1.13.0")
+
     // kotlin("test") alone resolves fine for the plain-JVM :protocol module, but this is
     // an Android module — its unit tests run on real JUnit4, and without this explicit
     // bridge kotlin.test.Test doesn't resolve at all (found live in whoop-bridge: "Unresolved
