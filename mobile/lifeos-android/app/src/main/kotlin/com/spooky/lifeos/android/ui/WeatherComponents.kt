@@ -2,6 +2,8 @@ package com.spooky.lifeos.android.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -34,6 +37,38 @@ private fun conditionIcon(conditions: String): ImageVector = when (conditions) {
     "Thunderstorm" -> Icons.Filled.Thunderstorm
     "Snow" -> Icons.Filled.AcUnit
     else -> Icons.Filled.Cloud // Clouds, Mist, Fog, Haze
+}
+
+/**
+ * Compact tap target for the hero's top-right corner — replaces the old full-width
+ * WeatherSummary card in the item list (see MainActivity.kt's TodayHero/TodayScreen), opening
+ * WeatherDetailScreen on tap. Deliberately icon+temp only; everything else lives in the detail
+ * screen or the Daily Rundown's own weather-clause tap target.
+ */
+@Composable
+fun WeatherChip(weather: WeatherView, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(LifeosColors.glassSurface)
+            .border(1.dp, LifeosColors.glassBorder, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            conditionIcon(weather.conditions),
+            contentDescription = weather.conditions,
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            "${weather.temperature}°${weather.unit}",
+            style = MaterialTheme.typography.labelMedium,
+            color = LifeosColors.foreground,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+    }
 }
 
 /**

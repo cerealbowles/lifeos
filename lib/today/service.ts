@@ -9,12 +9,11 @@ import { listPets } from "@/lib/pets/service";
 import { nextBirthday } from "@/lib/pets/birthday";
 import { listPlants } from "@/lib/growing/service";
 import { dayCount, nextCheckDue } from "@/lib/growing/day";
-import { formatInUserZone, joinWithAnd, plural } from "@/lib/format";
+import { endOfDayInZone, formatInUserZone, joinWithAnd, plural } from "@/lib/format";
 import { bucketCandidates, derivePulseState, type CandidateInput, type PulseState, type TodayBuckets } from "./ranking";
 import type { User } from "@/lib/db/schema";
 
 const LOOKAHEAD_DAYS = 14;
-const GLANCE_WINDOW_DAYS = 7;
 
 export type LatestMeasurement = { type: string; value: string; unit: string; measuredAt: string };
 
@@ -23,8 +22,8 @@ export type TodayOverview = TodayBuckets & {
   weather: null; // Milestone 3
   lists: Array<{ id: string; name: string; openItemCount: number }>;
   /**
-   * One compressed sentence describing the week ahead ("This week: 2 events, 3 tasks, and
-   * 1 bill."), or null when there's nothing notable. Deliberately a single sentence rather
+   * One compressed sentence describing today ("Today: 2 events, 3 tasks, and 1 bill."), or
+   * null when there's nothing notable. Deliberately a single sentence rather
    * than a strip of per-domain count badges — DECISIONS.md ADR-043 ("no unread counts as
    * the primary attention mechanic"): a row of "Tasks 3 / Events 2 / Bills 1" pills is
    * exactly the unread-badge-grid pattern that ADR calls out, even though each pill's label
@@ -40,7 +39,7 @@ export type TodayOverview = TodayBuckets & {
 
 export async function getTodayOverview(user: User, now: Date = new Date()): Promise<TodayOverview> {
   const lookaheadEnd = new Date(now.getTime() + LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000);
-  const glanceEnd = new Date(now.getTime() + GLANCE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const glanceEnd = endOfDayInZone(now, user.timezone);
 
   const [
     openTasks,
@@ -307,5 +306,5 @@ function buildGlanceSummary(counts: {
   if (counts.growChecksSoon > 0) parts.push(`${counts.growChecksSoon} grow check${plural(counts.growChecksSoon)}`);
 
   if (parts.length === 0) return null;
-  return `This week: ${joinWithAnd(parts)}.`;
+  return `Today: ${joinWithAnd(parts)}.`;
 }

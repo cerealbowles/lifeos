@@ -30,8 +30,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -50,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.spooky.lifeos.android.db.TodayCache
 import com.spooky.lifeos.android.sync.AuthClient
+import com.spooky.lifeos.android.sync.DailyRundownClient
 import com.spooky.lifeos.android.sync.LoginResult
 import com.spooky.lifeos.android.sync.TodayClient
 import com.spooky.lifeos.android.sync.ApiResult
@@ -76,19 +80,26 @@ import com.spooky.lifeos.android.sync.isCompletable
 import com.spooky.lifeos.android.sync.TodayFetchResult
 import com.spooky.lifeos.android.sync.TodayRefreshWorker
 import com.spooky.lifeos.android.sync.WeatherClient
+import com.spooky.lifeos.android.sync.WeatherForecastClient
 import com.spooky.lifeos.android.sync.WhoopSyncService
 import com.spooky.lifeos.android.ui.environment.EnvironmentalBackground
+import com.spooky.lifeos.android.ui.DailyRundown
+import com.spooky.lifeos.android.ui.DailyRundownCard
+import com.spooky.lifeos.android.ui.DailyRundownDetailScreen
 import com.spooky.lifeos.android.ui.DueBadge
 import com.spooky.lifeos.android.ui.ItemDetailSheet
 import com.spooky.lifeos.android.ui.LifeosColors
 import com.spooky.lifeos.android.ui.PulseIndicator
 import com.spooky.lifeos.android.ui.SwipeToCompleteRow
+import com.spooky.lifeos.android.ui.WeatherChip
+import com.spooky.lifeos.android.ui.WeatherDetailScreen
+import com.spooky.lifeos.android.ui.WeatherOverview
 import com.spooky.lifeos.android.ui.itemOpensSheet
 import com.spooky.lifeos.android.ui.motion.Motion
 import com.spooky.lifeos.android.ui.TasksScreen
+import com.spooky.lifeos.android.ui.TodayItem
 import com.spooky.lifeos.android.ui.TodayItemRow
 import com.spooky.lifeos.android.ui.TodayOverview
-import com.spooky.lifeos.android.ui.WeatherSummary
 import com.spooky.lifeos.android.ui.WeatherView
 import com.spooky.lifeos.android.ui.domainLabel
 import com.spooky.lifeos.android.ui.greeting
@@ -348,7 +359,13 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
  * doesn't need to thread any state down from `TodayScreen`.
  */
 @Composable
-private fun TodayHero(greeting: String, refreshing: Boolean, onRefresh: () -> Unit, weather: WeatherView?) {
+private fun TodayHero(
+    greeting: String,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    weather: WeatherView?,
+    onWeatherClick: () -> Unit,
+) {
     Box(modifier = Modifier.fillMaxWidth().height(260.dp)) {
         EnvironmentalBackground(modifier = Modifier.fillMaxSize(), weather = weather)
         // Bottom scrim — the mountain/treeline art is busiest right where the greeting sits,
@@ -369,6 +386,10 @@ private fun TodayHero(greeting: String, refreshing: Boolean, onRefresh: () -> Un
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            weather?.let {
+                WeatherChip(it, onClick = onWeatherClick)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(8.dp))
+            }
             if (refreshing) {
                 CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(20.dp), strokeWidth = 2.dp, color = LifeosColors.foreground)
             }
@@ -399,7 +420,17 @@ fun TodayScreen() {
     var offlineNotice by remember { mutableStateOf<String?>(null) }
     var loadedOnce by remember { mutableStateOf(false) }
     var weather by remember { mutableStateOf<WeatherView?>(null) }
-    var openItem by remember { mutableStateOf<com.spooky.lifeos.android.ui.TodayItem?>(null) }
+    var openItem by remember { mutableStateOf<TodayItem?>(null) }
+    // Not persisted to TodayCache-style storage: the rundown's tone (recap vs. still-evening)
+    // depends on live, time-sensitive state (game finality, minutes-until) — showing a stale
+    // cached "Recap" hours after conditions changed would actively mislead. In-memory only;
+    // self-suppresses (renders nothing) on fetch failure, same spirit as WeatherSummary's null.
+    var rundown by remember { mutableStateOf<DailyRundown?>(null) }
+    var showRundownDetail by remember { mutableStateOf(false) }
+    var showWeatherDetail by remember { mutableStateOf(false) }
+    var weatherOverview by remember { mutableStateOf<WeatherOverview?>(null) }
+    var weatherOverviewLoading by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
     fun loadFromCache() {
         cache.load()?.let { cached ->
@@ -433,6 +464,8 @@ fun TodayScreen() {
         // shouldn't trip Today's own offline notice, same self-suppressing spirit as the
         // web card (WeatherClient already collapses any failure to null internally).
         scope.launch { weather = WeatherClient(baseUrl, token).fetch() }
+        // Same independence — a failed rundown fetch just means no card this session.
+        scope.launch { rundown = DailyRundownClient(baseUrl, token).fetch() }
     }
 
     if (!loadedOnce) {
@@ -441,11 +474,22 @@ fun TodayScreen() {
         loadedOnce = true
     }
 
+    val domainHeaderIndex = remember(overview, rundown, lastFetchedMs, offlineNotice) {
+        computeDomainHeaderIndex(overview, rundown != null, lastFetchedMs != null, offlineNotice != null)
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        TodayHero(greeting = greeting(), refreshing = refreshing, onRefresh = { refresh() }, weather = weather)
+        TodayHero(
+            greeting = greeting(),
+            refreshing = refreshing,
+            onRefresh = { refresh() },
+            weather = weather,
+            onWeatherClick = { showWeatherDetail = true },
+        )
 
         val current = overview
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 16.dp),
@@ -453,8 +497,25 @@ fun TodayScreen() {
             item {
                 PulseIndicator(pulse = current?.pulse ?: "calm", nowCount = current?.now?.size ?: 0)
             }
-            weather?.let { w ->
-                item { WeatherSummary(w) }
+            rundown?.let { r ->
+                item {
+                    DailyRundownCard(
+                        rundown = r,
+                        onSegmentClick = { link ->
+                            when (link.kind) {
+                                "weather" -> showWeatherDetail = true
+                                "routines" -> domainHeaderIndex["routine"]?.let {
+                                    scope.launch { listState.animateScrollToItem(it) }
+                                }
+                                "task" -> domainHeaderIndex["task"]?.let {
+                                    scope.launch { listState.animateScrollToItem(it) }
+                                }
+                                "game" -> findGameItem(current, link.gameKey)?.let { openItem = it }
+                            }
+                        },
+                        onMoreClick = { showRundownDetail = true },
+                    )
+                }
             }
             lastFetchedMs?.let {
                 item {
@@ -553,6 +614,67 @@ fun TodayScreen() {
             refresh()
         },
     )
+
+    if (showWeatherDetail) {
+        // Fetched lazily on first open, not on every Home refresh — this screen is tapped into
+        // occasionally, not on every app open, so there's no reason to pay for it up front.
+        LaunchedEffect(Unit) {
+            if (weatherOverview == null) {
+                val baseUrl = config.getBaseUrl()
+                val token = config.getToken()
+                if (baseUrl != null && token != null) {
+                    weatherOverviewLoading = true
+                    weatherOverview = WeatherForecastClient(baseUrl, token).fetch()
+                    weatherOverviewLoading = false
+                }
+            }
+        }
+        BackHandler { showWeatherDetail = false }
+        WeatherDetailScreen(overview = weatherOverview, loading = weatherOverviewLoading, onBack = { showWeatherDetail = false })
+    }
+
+    if (showRundownDetail) {
+        BackHandler { showRundownDetail = false }
+        DailyRundownDetailScreen(rundown = rundown, onBack = { showRundownDetail = false })
+    }
+}
+
+/** Mirrors the LazyColumn content above's exact item sequence so a Daily Rundown "routines"/
+ *  "task" tap can scroll straight to that domain's SectionHeader — pure function (no
+ *  composition), recomputed only when the inputs that affect item layout actually change. */
+private fun computeDomainHeaderIndex(
+    overview: TodayOverview?,
+    hasRundownCard: Boolean,
+    hasLastFetched: Boolean,
+    hasOfflineNotice: Boolean,
+): Map<String, Int> {
+    var idx = 1 // PulseIndicator
+    if (hasRundownCard) idx++
+    if (hasLastFetched) idx++
+    if (hasOfflineNotice) idx++
+
+    val result = mutableMapOf<String, Int>()
+    if (overview == null) return result
+    if (overview.now.isNotEmpty()) idx += 1 + overview.now.size
+    overview.today.forEach { (domain, items) ->
+        if (items.isNotEmpty()) {
+            result[domain] = idx
+            idx += 1 + items.size
+        }
+    }
+    return result
+}
+
+/** Finds the TodayItem whose sports game matches a Daily Rundown "game" segment's gameKey —
+ *  the same synthetic id format server-side (lib/today/rundown.ts's gameKey / lib/today/
+ *  service.ts's candidate id: `${sport}-${awayTeam}-${homeTeam}-${startAt}`) survives
+ *  unchanged from candidate to ranked item, so a plain id match is enough; no separate lookup
+ *  table needed. Returns null (no-op tap) if the game isn't present in the current Today
+ *  payload — e.g. a Final game outside the lookahead window very late at night. */
+private fun findGameItem(overview: TodayOverview?, gameKey: String?): TodayItem? {
+    if (overview == null || gameKey == null) return null
+    return overview.now.find { it.domain == "sports" && it.id == gameKey }
+        ?: overview.today["sports"]?.find { it.id == gameKey }
 }
 
 /** Thin wrapper over the shared `ui/components/SectionHeader` — keeps this file's existing

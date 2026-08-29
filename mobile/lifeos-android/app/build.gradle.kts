@@ -91,4 +91,10 @@ dependencies {
     // bridge kotlin.test.Test doesn't resolve at all (found live in whoop-bridge: "Unresolved
     // reference 'Test'"). kotlin-test-junit maps kotlin.test's annotations/asserts onto JUnit4.
     testImplementation(kotlin("test-junit"))
+
+    // Android's own org.json.JSONObject is a "Stub!"-throwing placeholder on the plain-JVM
+    // unit test classpath (real org.json only exists in the on-device android.jar) — the
+    // parseXxx() functions this app hand-rolls with org.json (TodayModels.kt, WeatherModels.kt,
+    // DailyRundownModels.kt) can't be unit-tested at all without a real implementation here.
+    testImplementation("org.json:json:20231013")
 }
