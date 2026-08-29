@@ -1,7 +1,20 @@
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 export function formatInUserZone(date: Date | string, timezone: string, pattern: string): string {
   return formatInTimeZone(date, timezone, pattern);
+}
+
+/** The last instant of `now`'s calendar day in `timezone`, as a UTC Date — the "today" window
+ *  boundary shared by the glanceSummary rescope and the daily rundown's game/routine filtering. */
+export function endOfDayInZone(now: Date, timezone: string): Date {
+  const dateStr = formatInTimeZone(now, timezone, "yyyy-MM-dd");
+  return fromZonedTime(`${dateStr}T23:59:59.999`, timezone);
+}
+
+/** The first instant of `now`'s calendar day in `timezone`, as a UTC Date. */
+export function startOfDayInZone(now: Date, timezone: string): Date {
+  const dateStr = formatInTimeZone(now, timezone, "yyyy-MM-dd");
+  return fromZonedTime(`${dateStr}T00:00:00.000`, timezone);
 }
 
 export function greeting(date: Date, timezone: string): string {

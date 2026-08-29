@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserOrApiToken } from "@/lib/auth/api-token";
-import { getCurrentWeather } from "@/lib/weather/service";
+import { getCurrentWeather, getWeatherOverview } from "@/lib/weather/service";
 
 /**
  * JSON wrapper around getCurrentWeather — the web dashboard calls that service function
@@ -9,12 +9,24 @@ import { getCurrentWeather } from "@/lib/weather/service";
  * only when connected" weather summary the web dashboard shows. Returns `{ weather: null }`
  * (not a 404/error) when the user hasn't connected a weather provider — matches WeatherCard's
  * own `if (!weather) return null` self-suppression, not a failure state.
+ *
+ * `?scope=forecast` switches to getWeatherOverview, returning `{ weather: WeatherOverview }`
+ * (current + hourly + daily) instead of `{ weather: WeatherView }` — added for the native
+ * app's Weather detail screen. Same envelope shape either way so a client's null-check
+ * (`weather === null` means "not connected") doesn't need to branch on which scope it asked for.
  */
 export async function GET(request: Request) {
   const auth = await requireUserOrApiToken(request);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const units = auth.user.unitsSystem === "imperial" ? "imperial" : "metric";
+  const url = new URL(request.url);
+
+  if (url.searchParams.get("scope") === "forecast") {
+    const overview = await getWeatherOverview(auth.user.id, units);
+    return NextResponse.json({ weather: overview });
+  }
+
   const weather = await getCurrentWeather(auth.user.id, units);
   return NextResponse.json({ weather });
 }
