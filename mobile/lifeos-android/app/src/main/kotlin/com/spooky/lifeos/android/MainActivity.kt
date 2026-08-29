@@ -84,8 +84,7 @@ import com.spooky.lifeos.android.sync.WeatherForecastClient
 import com.spooky.lifeos.android.sync.WhoopSyncService
 import com.spooky.lifeos.android.ui.environment.EnvironmentalBackground
 import com.spooky.lifeos.android.ui.DailyRundown
-import com.spooky.lifeos.android.ui.DailyRundownCard
-import com.spooky.lifeos.android.ui.DailyRundownDetailScreen
+import com.spooky.lifeos.android.ui.DailyRundownSection
 import com.spooky.lifeos.android.ui.DueBadge
 import com.spooky.lifeos.android.ui.ItemDetailSheet
 import com.spooky.lifeos.android.ui.LifeosColors
@@ -426,7 +425,6 @@ fun TodayScreen() {
     // cached "Recap" hours after conditions changed would actively mislead. In-memory only;
     // self-suppresses (renders nothing) on fetch failure, same spirit as WeatherSummary's null.
     var rundown by remember { mutableStateOf<DailyRundown?>(null) }
-    var showRundownDetail by remember { mutableStateOf(false) }
     var showWeatherDetail by remember { mutableStateOf(false) }
     var weatherOverview by remember { mutableStateOf<WeatherOverview?>(null) }
     var weatherOverviewLoading by remember { mutableStateOf(false) }
@@ -474,8 +472,8 @@ fun TodayScreen() {
         loadedOnce = true
     }
 
-    val domainHeaderIndex = remember(overview, rundown, lastFetchedMs, offlineNotice) {
-        computeDomainHeaderIndex(overview, rundown != null, lastFetchedMs != null, offlineNotice != null)
+    val itemIndex = remember(overview, lastFetchedMs, offlineNotice) {
+        computeItemIndex(overview, lastFetchedMs != null, offlineNotice != null)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -495,26 +493,35 @@ fun TodayScreen() {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 16.dp),
         ) {
             item {
-                PulseIndicator(pulse = current?.pulse ?: "calm", nowCount = current?.now?.size ?: 0)
-            }
-            rundown?.let { r ->
-                item {
-                    DailyRundownCard(
+                val r = rundown
+                if (r != null) {
+                    // Fills the LazyColumn's own viewport height — the rundown reads as the
+                    // whole first "page" of Home, not one card in a scrolling stack (redesign
+                    // feedback). "More" scrolls straight to the first item card below it
+                    // rather than opening a separate detail screen.
+                    DailyRundownSection(
+                        pulse = current?.pulse ?: "calm",
+                        nowCount = current?.now?.size ?: 0,
                         rundown = r,
                         onSegmentClick = { link ->
                             when (link.kind) {
                                 "weather" -> showWeatherDetail = true
-                                "routines" -> domainHeaderIndex["routine"]?.let {
+                                "routines" -> itemIndex.domainHeaders["routine"]?.let {
                                     scope.launch { listState.animateScrollToItem(it) }
                                 }
-                                "task" -> domainHeaderIndex["task"]?.let {
+                                "task" -> itemIndex.domainHeaders["task"]?.let {
                                     scope.launch { listState.animateScrollToItem(it) }
                                 }
                                 "game" -> findGameItem(current, link.gameKey)?.let { openItem = it }
                             }
                         },
-                        onMoreClick = { showRundownDetail = true },
+                        onMoreClick = itemIndex.firstCardIndex?.let { target ->
+                            { scope.launch { listState.animateScrollToItem(target) } }
+                        },
+                        modifier = Modifier.fillParentMaxHeight(),
                     )
+                } else {
+                    PulseIndicator(pulse = current?.pulse ?: "calm", nowCount = current?.now?.size ?: 0)
                 }
             }
             lastFetchedMs?.let {
@@ -632,37 +639,38 @@ fun TodayScreen() {
         BackHandler { showWeatherDetail = false }
         WeatherDetailScreen(overview = weatherOverview, loading = weatherOverviewLoading, onBack = { showWeatherDetail = false })
     }
-
-    if (showRundownDetail) {
-        BackHandler { showRundownDetail = false }
-        DailyRundownDetailScreen(rundown = rundown, onBack = { showRundownDetail = false })
-    }
 }
 
-/** Mirrors the LazyColumn content above's exact item sequence so a Daily Rundown "routines"/
- *  "task" tap can scroll straight to that domain's SectionHeader — pure function (no
- *  composition), recomputed only when the inputs that affect item layout actually change. */
-private fun computeDomainHeaderIndex(
-    overview: TodayOverview?,
-    hasRundownCard: Boolean,
-    hasLastFetched: Boolean,
-    hasOfflineNotice: Boolean,
-): Map<String, Int> {
-    var idx = 1 // PulseIndicator
-    if (hasRundownCard) idx++
+/** Item indices the Daily Rundown's tap targets need: `domainHeaders` for "routines"/"task"
+ *  segment taps (scroll straight to that domain's SectionHeader), `firstCardIndex` for "More"
+ *  (scroll to wherever the real item cards start — RIGHT NOW if non-empty, else the first
+ *  non-empty TODAY domain — or null if there's nothing below the rundown to scroll to). */
+private data class ItemIndex(val domainHeaders: Map<String, Int>, val firstCardIndex: Int?)
+
+/** Mirrors the LazyColumn content above's exact item sequence — item 0 is always exactly one
+ *  item (the full-page rundown when present, else the bare PulseIndicator), so this is a pure
+ *  function of what follows it (no composition), recomputed only when those inputs change. */
+private fun computeItemIndex(overview: TodayOverview?, hasLastFetched: Boolean, hasOfflineNotice: Boolean): ItemIndex {
+    var idx = 1 // the single hero item at index 0 (rundown or bare PulseIndicator)
     if (hasLastFetched) idx++
     if (hasOfflineNotice) idx++
 
-    val result = mutableMapOf<String, Int>()
-    if (overview == null) return result
-    if (overview.now.isNotEmpty()) idx += 1 + overview.now.size
-    overview.today.forEach { (domain, items) ->
-        if (items.isNotEmpty()) {
-            result[domain] = idx
-            idx += 1 + items.size
+    val domainHeaders = mutableMapOf<String, Int>()
+    var firstCardIndex: Int? = null
+    if (overview != null) {
+        if (overview.now.isNotEmpty()) {
+            firstCardIndex = idx
+            idx += 1 + overview.now.size
+        }
+        overview.today.forEach { (domain, items) ->
+            if (items.isNotEmpty()) {
+                if (firstCardIndex == null) firstCardIndex = idx
+                domainHeaders[domain] = idx
+                idx += 1 + items.size
+            }
         }
     }
-    return result
+    return ItemIndex(domainHeaders, firstCardIndex)
 }
 
 /** Finds the TodayItem whose sports game matches a Daily Rundown "game" segment's gameKey —
