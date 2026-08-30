@@ -82,16 +82,12 @@ import com.spooky.lifeos.android.sync.TodayRefreshWorker
 import com.spooky.lifeos.android.sync.WeatherClient
 import com.spooky.lifeos.android.sync.WeatherForecastClient
 import com.spooky.lifeos.android.sync.WhoopSyncService
-import com.spooky.lifeos.android.ui.environment.EnvironmentalBackground
 import com.spooky.lifeos.android.ui.DailyRundown
-import com.spooky.lifeos.android.ui.DailyRundownCard
-import com.spooky.lifeos.android.ui.DailyRundownDetailScreen
 import com.spooky.lifeos.android.ui.DueBadge
 import com.spooky.lifeos.android.ui.ItemDetailSheet
 import com.spooky.lifeos.android.ui.LifeosColors
-import com.spooky.lifeos.android.ui.PulseIndicator
 import com.spooky.lifeos.android.ui.SwipeToCompleteRow
-import com.spooky.lifeos.android.ui.WeatherChip
+import com.spooky.lifeos.android.ui.TodayLandingSection
 import com.spooky.lifeos.android.ui.WeatherDetailScreen
 import com.spooky.lifeos.android.ui.WeatherOverview
 import com.spooky.lifeos.android.ui.itemOpensSheet
@@ -348,65 +344,6 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     }
 }
 
-/**
- * Home's mountain hero — the landscape scene sized and used the way the reference art actually
- * shows it (three inspiration screenshots the user shared, compared directly against this
- * build): a real hero banner at the top of Home only, greeting overlaid in the serif display
- * face over a bottom scrim for legibility, not a faint wash bleeding through every card on
- * every tab (that was this file's original root-level approach — see the comment at the
- * `MaterialTheme` call site). Owns its own [EnvironmentalBackground] instance sized to the hero
- * box; the composable is self-contained (polls its own clock, drives its own crossfade) so this
- * doesn't need to thread any state down from `TodayScreen`.
- */
-@Composable
-private fun TodayHero(
-    greeting: String,
-    refreshing: Boolean,
-    onRefresh: () -> Unit,
-    weather: WeatherView?,
-    onWeatherClick: () -> Unit,
-) {
-    Box(modifier = Modifier.fillMaxWidth().height(260.dp)) {
-        EnvironmentalBackground(modifier = Modifier.fillMaxSize(), weather = weather)
-        // Bottom scrim — the mountain/treeline art is busiest right where the greeting sits,
-        // so darken just that band rather than relying on the parchment text color alone.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
-                        startY = 0.4f,
-                        endY = 1f,
-                    ),
-                ),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().align(Alignment.TopEnd).padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            weather?.let {
-                WeatherChip(it, onClick = onWeatherClick)
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(8.dp))
-            }
-            if (refreshing) {
-                CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(20.dp), strokeWidth = 2.dp, color = LifeosColors.foreground)
-            }
-            IconButton(onClick = onRefresh, enabled = !refreshing) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = LifeosColors.foreground)
-            }
-        }
-        Text(
-            greeting,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = LifeosColors.foreground,
-            modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 14.dp),
-        )
-    }
-}
-
 @Composable
 fun TodayScreen() {
     val context = LocalContext.current
@@ -426,7 +363,6 @@ fun TodayScreen() {
     // cached "Recap" hours after conditions changed would actively mislead. In-memory only;
     // self-suppresses (renders nothing) on fetch failure, same spirit as WeatherSummary's null.
     var rundown by remember { mutableStateOf<DailyRundown?>(null) }
-    var showRundownDetail by remember { mutableStateOf(false) }
     var showWeatherDetail by remember { mutableStateOf(false) }
     var weatherOverview by remember { mutableStateOf<WeatherOverview?>(null) }
     var weatherOverviewLoading by remember { mutableStateOf(false) }
@@ -474,52 +410,80 @@ fun TodayScreen() {
         loadedOnce = true
     }
 
-    val domainHeaderIndex = remember(overview, rundown, lastFetchedMs, offlineNotice) {
-        computeDomainHeaderIndex(overview, rundown != null, lastFetchedMs != null, offlineNotice != null)
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        TodayHero(
-            greeting = greeting(),
-            refreshing = refreshing,
-            onRefresh = { refresh() },
-            weather = weather,
-            onWeatherClick = { showWeatherDetail = true },
-        )
-
-        val current = overview
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp, bottom = 16.dp),
-        ) {
-            item {
-                PulseIndicator(pulse = current?.pulse ?: "calm", nowCount = current?.now?.size ?: 0)
-            }
-            rundown?.let { r ->
-                item {
-                    DailyRundownCard(
-                        rundown = r,
-                        onSegmentClick = { link ->
-                            when (link.kind) {
-                                "weather" -> showWeatherDetail = true
-                                "routines" -> domainHeaderIndex["routine"]?.let {
-                                    scope.launch { listState.animateScrollToItem(it) }
-                                }
-                                "task" -> domainHeaderIndex["task"]?.let {
-                                    scope.launch { listState.animateScrollToItem(it) }
-                                }
-                                "game" -> findGameItem(current, link.gameKey)?.let { openItem = it }
-                            }
-                        },
-                        onMoreClick = { showRundownDetail = true },
-                    )
+    // Full-screen replacement, not an overlay: WeatherDetailScreen has no opaque background of
+    // its own, so composing it *alongside* the rest of this screen (as a trailing sibling,
+    // the previous approach) let Home's own hero/list show and draw text through underneath it
+    // — reported as "loads font on top of existing font." Returning early here instead (same
+    // pattern SettingsScreen/BrowseScreen already use for their own full-screen children) means
+    // only one screen is ever composed at a time.
+    if (showWeatherDetail) {
+        // Fetched lazily on first open, not on every Home refresh — this screen is tapped into
+        // occasionally, not on every app open, so there's no reason to pay for it up front.
+        LaunchedEffect(Unit) {
+            if (weatherOverview == null) {
+                val baseUrl = config.getBaseUrl()
+                val token = config.getToken()
+                if (baseUrl != null && token != null) {
+                    weatherOverviewLoading = true
+                    weatherOverview = WeatherForecastClient(baseUrl, token).fetch()
+                    weatherOverviewLoading = false
                 }
             }
-            lastFetchedMs?.let {
-                item {
-                    val minutesAgo = (System.currentTimeMillis() - it) / TimeUnit.MINUTES.toMillis(1)
+        }
+        BackHandler { showWeatherDetail = false }
+        WeatherDetailScreen(overview = weatherOverview, loading = weatherOverviewLoading, onBack = { showWeatherDetail = false })
+        return
+    }
+
+    val itemIndex = remember(overview, lastFetchedMs, offlineNotice) {
+        computeItemIndex(overview, lastFetchedMs != null, offlineNotice != null)
+    }
+
+    val current = overview
+    // No horizontal padding at the LazyColumn level — the landing item needs to sit edge-to-
+    // edge (mountain art filling the whole screen, redesign feedback), so every *other* item
+    // insets itself individually via ItemInset below instead of one padding applying to all.
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+    ) {
+        item {
+            // Fills the LazyColumn's own viewport height — the whole first "page" of Home,
+            // mountain art edge-to-edge, not a card floating on a flat background. "More"
+            // scrolls straight to the first item card below it.
+            TodayLandingSection(
+                greeting = greeting(),
+                refreshing = refreshing,
+                onRefresh = { refresh() },
+                weather = weather,
+                onWeatherClick = { showWeatherDetail = true },
+                pulse = current?.pulse ?: "calm",
+                nowCount = current?.now?.size ?: 0,
+                rundown = rundown,
+                onSegmentClick = { link ->
+                    when (link.kind) {
+                        "weather" -> showWeatherDetail = true
+                        "routines" -> itemIndex.domainHeaders["routine"]?.let {
+                            scope.launch { listState.animateScrollToItem(it) }
+                        }
+                        "task" -> itemIndex.domainHeaders["task"]?.let {
+                            scope.launch { listState.animateScrollToItem(it) }
+                        }
+                        "game" -> findGameItem(current, link.gameKey)?.let { openItem = it }
+                    }
+                },
+                onMoreClick = itemIndex.firstCardIndex?.let { target ->
+                    { scope.launch { listState.animateScrollToItem(target) } }
+                },
+                modifier = Modifier.fillParentMaxHeight(),
+            )
+        }
+        lastFetchedMs?.let {
+            item {
+                val minutesAgo = (System.currentTimeMillis() - it) / TimeUnit.MINUTES.toMillis(1)
+                ItemInset {
                     Text(
                         if (minutesAgo <= 0) "Updated just now" else "Updated ${minutesAgo}m ago",
                         style = MaterialTheme.typography.bodySmall,
@@ -527,25 +491,29 @@ fun TodayScreen() {
                     )
                 }
             }
-            offlineNotice?.let { notice ->
-                item {
-                    Text(notice, style = MaterialTheme.typography.bodySmall, color = LifeosColors.dueSoonFg)
-                }
+        }
+        offlineNotice?.let { notice ->
+            item {
+                ItemInset { Text(notice, style = MaterialTheme.typography.bodySmall, color = LifeosColors.dueSoonFg) }
             }
+        }
 
-            if (current == null) {
-                item {
+        if (current == null) {
+            item {
+                ItemInset {
                     Text("No cached data yet — connect once to sync.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium)
                 }
-            } else {
-                if (current.now.isNotEmpty()) {
-                    item {
-                        SectionHeader("RIGHT NOW", count = current.now.size)
-                    }
-                    // Swipe-to-complete on NOW only (matching now-list.tsx — TODAY items are
-                    // tap-through-only on the web too), and only for domains that actually have
-                    // a one-tap complete action (isCompletable mirrors getCompleteRequest).
-                    itemsIndexed(current.now, key = { _, it -> "now-${it.domain}-${it.id}" }) { index, todayItem ->
+            }
+        } else {
+            if (current.now.isNotEmpty()) {
+                item {
+                    ItemInset { SectionHeader("RIGHT NOW", count = current.now.size) }
+                }
+                // Swipe-to-complete on NOW only (matching now-list.tsx — TODAY items are
+                // tap-through-only on the web too), and only for domains that actually have
+                // a one-tap complete action (isCompletable mirrors getCompleteRequest).
+                itemsIndexed(current.now, key = { _, it -> "now-${it.domain}-${it.id}" }) { index, todayItem ->
+                    ItemInset {
                         com.spooky.lifeos.android.ui.motion.StaggeredEntrance(index = index) {
                             if (isCompletable(todayItem)) {
                                 SwipeToCompleteRow(
@@ -581,10 +549,14 @@ fun TodayScreen() {
                         }
                     }
                 }
-                current.today.forEach { (domain, domainItems) ->
-                    if (domainItems.isNotEmpty()) {
-                        item(key = "header-$domain") { SectionHeader(domainLabel(domain).uppercase(), count = domainItems.size) }
-                        itemsIndexed(domainItems, key = { _, it -> "today-$domain-${it.id}" }) { index, item ->
+            }
+            current.today.forEach { (domain, domainItems) ->
+                if (domainItems.isNotEmpty()) {
+                    item(key = "header-$domain") {
+                        ItemInset { SectionHeader(domainLabel(domain).uppercase(), count = domainItems.size) }
+                    }
+                    itemsIndexed(domainItems, key = { _, it -> "today-$domain-${it.id}" }) { index, item ->
+                        ItemInset {
                             com.spooky.lifeos.android.ui.motion.StaggeredEntrance(index = index) {
                                 TodayItemRow(
                                     item,
@@ -595,8 +567,10 @@ fun TodayScreen() {
                         }
                     }
                 }
-                if (current.now.isEmpty() && current.today.values.all { it.isEmpty() }) {
-                    item {
+            }
+            if (current.now.isEmpty() && current.today.values.all { it.isEmpty() }) {
+                item {
+                    ItemInset {
                         Text("All done. Nothing needs you right now.", color = LifeosColors.mutedFg, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
@@ -614,55 +588,46 @@ fun TodayScreen() {
             refresh()
         },
     )
-
-    if (showWeatherDetail) {
-        // Fetched lazily on first open, not on every Home refresh — this screen is tapped into
-        // occasionally, not on every app open, so there's no reason to pay for it up front.
-        LaunchedEffect(Unit) {
-            if (weatherOverview == null) {
-                val baseUrl = config.getBaseUrl()
-                val token = config.getToken()
-                if (baseUrl != null && token != null) {
-                    weatherOverviewLoading = true
-                    weatherOverview = WeatherForecastClient(baseUrl, token).fetch()
-                    weatherOverviewLoading = false
-                }
-            }
-        }
-        BackHandler { showWeatherDetail = false }
-        WeatherDetailScreen(overview = weatherOverview, loading = weatherOverviewLoading, onBack = { showWeatherDetail = false })
-    }
-
-    if (showRundownDetail) {
-        BackHandler { showRundownDetail = false }
-        DailyRundownDetailScreen(rundown = rundown, onBack = { showRundownDetail = false })
-    }
 }
 
-/** Mirrors the LazyColumn content above's exact item sequence so a Daily Rundown "routines"/
- *  "task" tap can scroll straight to that domain's SectionHeader — pure function (no
- *  composition), recomputed only when the inputs that affect item layout actually change. */
-private fun computeDomainHeaderIndex(
-    overview: TodayOverview?,
-    hasRundownCard: Boolean,
-    hasLastFetched: Boolean,
-    hasOfflineNotice: Boolean,
-): Map<String, Int> {
-    var idx = 1 // PulseIndicator
-    if (hasRundownCard) idx++
+/** Insets one LazyColumn item's content horizontally — used for every item except the
+ *  edge-to-edge landing section (see the "No horizontal padding at the LazyColumn level"
+ *  comment above), so the rest of Home keeps its original inset card/list look. */
+@Composable
+private fun ItemInset(content: @Composable () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { content() }
+}
+
+/** Item indices the Daily Rundown's tap targets need: `domainHeaders` for "routines"/"task"
+ *  segment taps (scroll straight to that domain's SectionHeader), `firstCardIndex` for "More"
+ *  (scroll to wherever the real item cards start — RIGHT NOW if non-empty, else the first
+ *  non-empty TODAY domain — or null if there's nothing below the rundown to scroll to). */
+private data class ItemIndex(val domainHeaders: Map<String, Int>, val firstCardIndex: Int?)
+
+/** Mirrors the LazyColumn content above's exact item sequence — item 0 is always exactly one
+ *  item (TodayLandingSection, whether or not the rundown itself has loaded yet), so this is a
+ *  pure function of what follows it (no composition), recomputed only when those inputs change. */
+private fun computeItemIndex(overview: TodayOverview?, hasLastFetched: Boolean, hasOfflineNotice: Boolean): ItemIndex {
+    var idx = 1 // the single landing-section item at index 0
     if (hasLastFetched) idx++
     if (hasOfflineNotice) idx++
 
-    val result = mutableMapOf<String, Int>()
-    if (overview == null) return result
-    if (overview.now.isNotEmpty()) idx += 1 + overview.now.size
-    overview.today.forEach { (domain, items) ->
-        if (items.isNotEmpty()) {
-            result[domain] = idx
-            idx += 1 + items.size
+    val domainHeaders = mutableMapOf<String, Int>()
+    var firstCardIndex: Int? = null
+    if (overview != null) {
+        if (overview.now.isNotEmpty()) {
+            firstCardIndex = idx
+            idx += 1 + overview.now.size
+        }
+        overview.today.forEach { (domain, items) ->
+            if (items.isNotEmpty()) {
+                if (firstCardIndex == null) firstCardIndex = idx
+                domainHeaders[domain] = idx
+                idx += 1 + items.size
+            }
         }
     }
-    return result
+    return ItemIndex(domainHeaders, firstCardIndex)
 }
 
 /** Finds the TodayItem whose sports game matches a Daily Rundown "game" segment's gameKey —

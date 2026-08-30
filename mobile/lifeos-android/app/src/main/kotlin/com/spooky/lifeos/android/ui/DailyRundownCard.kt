@@ -1,58 +1,38 @@
 package com.spooky.lifeos.android.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 private const val LINK_TAG = "rundown-link"
 
 /**
- * Home screen's tone-shifting narrative card (morning/afternoon/night/recap, see
- * lib/today/rundown.ts). The one genuinely new UI pattern this feature introduces to the
- * Android app: individually tappable phrases inside a paragraph, via AnnotatedString +
- * ClickableText rather than a whole-row `.clickable()`.
+ * The Daily Rundown's tappable sentence (morning/afternoon/night/recap, see
+ * lib/today/rundown.ts) — just the text itself; layout/background is owned by the caller
+ * (TodayLanding.kt's TodayLandingSection, which overlays this on the full-bleed hero). Tap
+ * targets use the same foreground color as the rest of the sentence, with only a thin
+ * underline as the affordance — no accent-color highlighting. An earlier version colored *and*
+ * underlined tappable phrases, which read as too attention-grabbing for what's meant to be a
+ * calm, editorial read (redesign feedback).
  */
 @Composable
-fun DailyRundownCard(rundown: DailyRundown, onSegmentClick: (RundownLink) -> Unit, onMoreClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = LifeosColors.glassSurface),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, LifeosColors.glassBorder),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            val annotated = rundownAnnotatedString(rundown)
-            ClickableText(
-                text = annotated,
-                style = MaterialTheme.typography.bodyMedium.copy(color = LifeosColors.foreground),
-                onClick = { offset ->
-                    annotated.getStringAnnotations(tag = LINK_TAG, start = offset, end = offset)
-                        .firstOrNull()
-                        ?.let { onSegmentClick(decodeLink(it.item)) }
-                },
-            )
-            TextButton(onClick = onMoreClick, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text("More", color = LifeosColors.accent)
-            }
-        }
-    }
+fun RundownSentenceText(rundown: DailyRundown, onSegmentClick: (RundownLink) -> Unit) {
+    val annotated = rundownAnnotatedString(rundown)
+    ClickableText(
+        text = annotated,
+        style = MaterialTheme.typography.titleMedium.copy(color = LifeosColors.foreground, lineHeight = 30.sp),
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = LINK_TAG, start = offset, end = offset)
+                .firstOrNull()
+                ?.let { onSegmentClick(decodeLink(it.item)) }
+        },
+    )
 }
 
 /** Builds the tappable AnnotatedString by walking `rundown.segments`, matching each
@@ -67,7 +47,9 @@ private fun rundownAnnotatedString(rundown: DailyRundown): AnnotatedString = bui
         if (start < 0) continue
         append(text.substring(cursor, start))
         pushStringAnnotation(tag = LINK_TAG, annotation = encodeLink(segment.link))
-        withStyle(SpanStyle(color = LifeosColors.accent, textDecoration = TextDecoration.Underline)) {
+        // Same foreground color as the surrounding text (no accent highlight) — a plain
+        // underline is affordance enough, and stays quiet rather than shouting for attention.
+        withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
             append(segment.text)
         }
         pop()
