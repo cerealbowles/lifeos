@@ -16,14 +16,48 @@ export type SleepSegmentInput = { stage: SleepStage; startedAt: Date; endedAt: D
 const SESSION_GAP_MS = 60 * 60 * 1000; // 60 min — see plan's "gap threshold" reasoning
 
 /**
+ * Hard ceiling on a single session's total span, independent of the gap rule above. Seen
+ * live: a phone that lost its BLE link to the strap for ~54h (Doze/out-of-range/killed
+ * background service) reconnected and drained the strap's on-board backlog in one derive
+ * pass (mobile SleepDerive.kt's computeSegments has no duration cap of its own — see its
+ * doc comment). If the strap reported one unchanging stage across the whole gap — plausible
+ * if it sat off-wrist — the phone uploads that as a single ~54h segment, which is
+ * contiguous-in-time and so would otherwise merge straight into a session and render as
+ * "asleep for 54 hours." This cap is the last line of defense against that: no human sleep
+ * session is plausibly this long, so once continuing the current session would push its
+ * total span past this, force a new session to start instead, no matter how "contiguous"
+ * the uploaded segment looks.
+ */
+const MAX_SESSION_DURATION_MS = 16 * 60 * 60 * 1000; // 16h — generous for a long illness/oversleep, well under any bogus multi-day merge
+
+/**
+ * Pure decision of whether `segment` extends the session currently open
+ * (`currentSessionStartedAt`/`currentSessionEndedAt`, both null if there is no open
+ * session) — split out from `recordSleepSegments` so the gap + duration-cap rules are
+ * unit-testable without a database.
+ */
+export function continuesSession(
+  segment: Pick<SleepSegmentInput, "startedAt" | "endedAt">,
+  currentSessionStartedAt: Date | null,
+  currentSessionEndedAt: Date | null,
+): boolean {
+  if (currentSessionStartedAt === null || currentSessionEndedAt === null) return false;
+  const gapMs = segment.startedAt.getTime() - currentSessionEndedAt.getTime();
+  if (gapMs > SESSION_GAP_MS) return false;
+  const projectedDurationMs = segment.endedAt.getTime() - currentSessionStartedAt.getTime();
+  return projectedDurationMs <= MAX_SESSION_DURATION_MS;
+}
+
+/**
  * Groups uploaded segments into sessions server-side (not on the phone) — the phone can
  * only see its own sync batch, but the server can see the user's full history, which is
  * what's needed to decide "is this a continuation of last night, or a new session" when a
  * night's data arrives across multiple syncs (seen live during the 20-day backlog drain).
  * A segment starting within SESSION_GAP_MS of the user's most recent segment extends that
- * session; otherwise it starts a new one. Segments within one input batch are treated the
- * same way, in order, so this also handles "insert segments for a whole never-before-seen
- * night in one call" correctly.
+ * session (unless doing so would exceed MAX_SESSION_DURATION_MS, see above); otherwise it
+ * starts a new one. Segments within one input batch are treated the same way, in order, so
+ * this also handles "insert segments for a whole never-before-seen night in one call"
+ * correctly.
  */
 export async function recordSleepSegments(userId: string, segments: SleepSegmentInput[]) {
   if (segments.length === 0) return;
@@ -45,9 +79,7 @@ export async function recordSleepSegments(userId: string, segments: SleepSegment
 
   for (const segment of ordered) {
     const continuesCurrent =
-      currentSessionId !== null &&
-      currentSessionEndedAt !== null &&
-      segment.startedAt.getTime() - currentSessionEndedAt.getTime() <= SESSION_GAP_MS;
+      currentSessionId !== null && continuesSession(segment, currentSessionStartedAt, currentSessionEndedAt);
 
     if (!continuesCurrent) {
       const [session] = await db
